@@ -480,10 +480,14 @@ def compute_quant_scores(code, name, curr_price, prev_close, klines_info=None):
     mt_tag, mt_cls = get_tag(mid_score)
     lt_tag, lt_cls = get_tag(long_score)
 
+    st_desc = "量比爆发配合良好，突破关键压力位，具备短线强攻动能" if short_score >= 80 else ("量能温和中性震荡，分时回踩均线支撑，适合逢低吸纳" if short_score >= 60 else "均线空头受压，量能萎缩存量博弈，短线动能偏弱严禁追高")
+    mt_desc = "上升通道维持完好，MA20/60多头排列，波段趋势强劲" if mid_score >= 80 else ("箱体震荡整理蓄势，均线系统纠缠粘合，等待右侧放量信号" if mid_score >= 60 else "破位下行通道中，中均线压制明显，仍处筑底调整周期")
+    lt_desc = "处于历史估值低分位，安全边际极厚，向上赔率巨大" if long_score >= 80 else ("估值合理中枢水平，基本面支撑良好，具备防御配置价值" if long_score >= 60 else "估值溢价偏高或处于周期高位，长线安全垫不足需谨慎")
+
     return {
-        "short_term": {"score": short_score, "tag": st_tag, "style": st_cls, "desc": "量比配合良好，具备短线博弈与冲高动能"},
-        "mid_term": {"score": mid_score, "tag": mt_tag, "style": mt_cls, "desc": "趋势通道维持完好，沿均线稳步推进"},
-        "long_term": {"score": long_score, "tag": lt_tag, "style": lt_cls, "desc": "估值水平具备安全边际，下行空间有限"},
+        "short_term": {"score": short_score, "tag": st_tag, "style": st_cls, "desc": st_desc},
+        "mid_term": {"score": mid_score, "tag": mt_tag, "style": mt_cls, "desc": mt_desc},
+        "long_term": {"score": long_score, "tag": lt_tag, "style": lt_cls, "desc": lt_desc},
         "ma5": ma5, "ma20": ma20, "ma60": ma60,
         "rsi": rsi_14,
         "overall_grade": "A+ 顶格精选" if short_score >= 82 else ("A 级 优先标的" if (short_score+mid_score)/2 >= 70 else "B 级 观察仓位")
@@ -1778,8 +1782,32 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             
             quote = fetch_real_quote(symbol)
             kline_data = fetch_kline_history(symbol, days=120)
-            scores = compute_quant_scores(code, quote.get("name", ""), quote.get("curr_price", 0), quote.get("prev_close", 0), kline_data)
-            plan = compute_trade_plan(quote.get("curr_price", 0))
+            curr_p = float(quote.get("curr_price", 0.0) or 0.0)
+            prev_c = float(quote.get("prev_close", 0.0) or curr_p)
+            scores = compute_quant_scores(code, quote.get("name", ""), curr_p, prev_c, kline_data)
+
+            # 智能检查是否为用户真实持仓
+            pf_file = get_portfolio_path()
+            holding_info = None
+            if os.path.exists(pf_file):
+                try:
+                    with open(pf_file, "r", encoding="utf-8") as f:
+                        stocks_pf = json.load(f)
+                    for sp in stocks_pf:
+                        if str(sp.get("代码", "")).strip() == code:
+                            c_cost = float(sp.get("成本价", 0.0) or 0.0)
+                            if c_cost > 0:
+                                holding_info = sp
+                                break
+                except Exception:
+                    pass
+
+            if holding_info:
+                cost = float(holding_info.get("成本价", 0.0))
+                shares = int(holding_info.get("持仓股数", 1000) or 1000)
+                plan = compute_trade_plan(curr_p, is_holding=True, cost=cost)
+            else:
+                plan = compute_trade_plan(curr_p, is_holding=False, cost=0.0)
 
             self.send_json({
                 "code": code,
@@ -1787,7 +1815,8 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
                 "quote": quote,
                 "kline": kline_data,
                 "scores": scores,
-                "plan": plan
+                "plan": plan,
+                "is_holding": bool(holding_info)
             })
 
         elif path == "/api/hotspots":
@@ -1879,32 +1908,96 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
                     target_symbol, target_code, _ = resolve_stock(target_code)
                 quote = fetch_real_quote(target_symbol)
                 kline_data = fetch_kline_history(target_symbol, days=60)
-                scores = compute_quant_scores(target_code, quote.get("name"), quote.get("curr_price"), quote.get("prev_close"), kline_data)
-                plan = compute_trade_plan(quote.get("curr_price", 0))
+                curr_p = float(quote.get("curr_price", 0.0) or 0.0)
+                prev_c = float(quote.get("prev_close", 0.0) or curr_p)
+                scores = compute_quant_scores(target_code, quote.get("name"), curr_p, prev_c, kline_data)
 
-                if ai_advisor and hasattr(ai_advisor, "diagnose_single_stock"):
+                # 智能识别是否为实战持仓股并提取真实成本
+                pf_file = get_portfolio_path()
+                holding_item = None
+                if os.path.exists(pf_file):
                     try:
-                        report = ai_advisor.diagnose_single_stock(target_code, quote, scores, plan)
-                        self.send_json({"report": report})
-                        return
-                    except Exception as e:
-                        print(f"ai_advisor error: {e}")
+                        with open(pf_file, "r", encoding="utf-8") as f:
+                            pf_list = json.load(f)
+                        for sp in pf_list:
+                            if str(sp.get("代码", "")).strip() == target_code:
+                                cost_val = float(sp.get("成本价", 0.0) or 0.0)
+                                if cost_val > 0:
+                                    holding_item = sp
+                                    break
+                    except Exception:
+                        pass
 
-                prompt = f"""
-你是一名资深 A 股私募基金投资总监。请针对以下单只标的做一份【极度精炼、纯干货、实操指导】的个股深度体检报告：
-股票标的：{quote.get('name')} ({target_code})
-最新价格：{quote.get('curr_price')} 元 (今日涨跌: {((quote.get('curr_price')-quote.get('prev_close'))/quote.get('prev_close')*100 if quote.get('prev_close') else 0):.2f}%)
-量化指标：MA5={scores.get('ma5')} | MA20={scores.get('ma20')} | MA60={scores.get('ma60')} | RSI(14)={scores.get('rsi')}
-多因子评分：短线T+1={scores.get('short_term', {}).get('score')}分 | 中线波段={scores.get('mid_term', {}).get('score')}分 | 长线价值={scores.get('long_term', {}).get('score')}分 | 评级={scores.get('overall_grade')}
-参考点位：建议买入/低吸区间={plan.get('buy_range', plan.get('t_buy'))} | 目标止盈={plan.get('target1', plan.get('t_sell'))} | 刚性止损={plan.get('stop_loss', plan.get('hard_stop'))}
+                pct_today_str = f"{((curr_p - prev_c)/prev_c*100):+.2f}%" if prev_c else "0.00%"
+
+                if holding_item:
+                    # 【场景 A：实战持仓股】—— 全周期操盘实战指导（短线/中线/长线全方位覆盖 + 盈亏针对性应对）
+                    cost = float(holding_item.get("成本价", 0.0))
+                    shares = int(holding_item.get("持仓股数", 1000) or 1000)
+                    loss_pct = round(((curr_p - cost) / cost) * 100, 2)
+                    total_loss = round((curr_p - cost) * shares, 2)
+                    needed_gain = round(((cost - curr_p) / curr_p) * 100, 2) if curr_p > 0 else 0.0
+                    plan = compute_trade_plan(curr_p, is_holding=True, cost=cost)
+
+                    profit_status = f"盈利 +{loss_pct:.2f}% (+{total_loss:.2f} 元)" if loss_pct > 0 else (f"持平 0.00%" if loss_pct == 0 else f"浮亏 {loss_pct:.2f}% ({total_loss:.2f} 元，直接回本需涨幅 +{needed_gain:.2f}%)")
+
+                    prompt = f"""你是一名资深 A 股私募基金投资总监。请针对用户【已购入的实战持仓标的】，结合其真实买入成本、当前盈亏及量化多因子评分，输出一份【全周期操盘手实战指导报告】：
+
+【持仓账户与盘口数据】：
+- 股票标的：{quote.get('name')} ({target_code})
+- 您的买入成本：{cost:.2f} 元
+- 当前最新现价：{curr_p:.2f} 元 (今日涨跌: {pct_today_str})
+- 您的持仓股数：{shares} 股
+- 当前持仓状态：{profit_status}
+- 量化多因子指标：MA5={scores.get('ma5')} | MA20={scores.get('ma20')} | MA60={scores.get('ma60')} | RSI(14)={scores.get('rsi')}
+- 三大周期量化评分：短线T+1={scores.get('short_term', {}).get('score')}分 ({scores.get('short_term', {}).get('desc')}) | 中线波段={scores.get('mid_term', {}).get('score')}分 ({scores.get('mid_term', {}).get('desc')}) | 长线配置={scores.get('long_term', {}).get('score')}分 ({scores.get('long_term', {}).get('desc')})
+- 系统量化点位：日内做T买点【{plan.get('t_buy')}元】 | 冲高做T卖点【{plan.get('t_sell')}元】 | 刚性止损底线【{plan.get('hard_stop')}元】
+
+【硬性表达要求】：
+1. 用户已明确持有该股票！严禁任何“建议初次建仓买入”、“轻仓试水”等针对未持仓者的套话！
+2. 语言干练犀利、一针见血，拒绝客套寒暄，直奔主题，严格按照以下四大板块输出，针对【短线、中线、长线】给出极其具体的点位与操作策略：
+
+### 一、 盘口健康度与持仓筹码结构定性
+- 结合当前成本价与现价，分析筹码处于获利盘锁定还是套牢抛压区；给出上方最近密集阻力位、下方核心防守支撑位。
+
+### 二、 三大持有周期实战定调与具体操作
+结合量化得分（短线/中线/长线），明确给出三个不同持有周期的差异化操作指引：
+1. **⚡ 短线 T+1 操盘策略**：若用户偏好超短线，结合日内量比与分时波动，次日冲高是否应该落袋？日内做 T 低吸（回踩买入价）与高抛（冲高卖出价）的具体点位及预期差价收益。
+2. **🌊 中线波段操盘策略**：若用户做中线波段，结合 MA20/MA60 均线通道与动量趋势，当前处于波段持股期、反弹减仓期还是加仓窗口？给出波段持仓的底仓比例与移动止盈位。
+3. **💎 长线价值配置策略**：若用户做长线中军，结合当前估值分位、PB 安全边际与基本面底色，该股是否具备穿越牛熊的长期底仓防御价值？在何种支撑位适合逢低金字塔式补仓？
+
+### 三、 账户当前盈亏针对性应对策略
+- 若当前处于【盈利】：如何设置移动止盈保护垫，让利润奔跑的同时锁住既得胜利果实；
+- 若当前处于【微利/平盘】：多空方向选择在即，关键防守点位与减仓信号在何处；
+- 若当前处于【浮亏被套】：如何利用日内做 T 压低综合持仓成本，反弹至哪个关键技术压力位必须果断减亏降仓，绝不盲目死扛。
+
+### 四、 涨乐财富通条件单设置清单（供直接照抄）
+以清晰的 Markdown 表格输出不同操作偏好的自动化条件单：
+| 操盘偏好 | 条件单类型 | 触发价格 | 委托操作与数量 | 战术目的 |
+"""
+                else:
+                    # 【场景 B：观察自选 / 市场热点推荐标的】—— 启动左侧狙击与建仓计划
+                    plan = compute_trade_plan(curr_p, is_holding=False, cost=0.0)
+                    prompt = f"""你是一名专业私募基金投资总监。请针对以下用户【尚未持仓的观察标的】，输出一份【极度精炼、纯干货、零废话】的操盘手实战狙击建仓策略：
+
+【标的技术面实时数据】：
+- 股票标的：{quote.get('name')} ({target_code})
+- 当前最新价格：{curr_p:.2f} 元 (今日涨跌: {pct_today_str})
+- 技术面指标：MA5={scores.get('ma5')} | MA20={scores.get('ma20')} | MA60={scores.get('ma60')} | RSI(14)={scores.get('rsi')}
+- 多因子评分：短线T+1={scores.get('short_term', {}).get('score')}分 ({scores.get('short_term', {}).get('desc')}) | 中线波段={scores.get('mid_term', {}).get('score')}分 | 长线价值={scores.get('long_term', {}).get('score')}分 | 评级={scores.get('overall_grade')}
+- 计划点位：建议回踩买入区间【{plan.get('buy_range')}】 | 短线目标【{plan.get('target1')}元】 | 波段目标【{plan.get('target2')}元】 | 刚性止损【{plan.get('stop_loss')}元】
 
 【硬性要求】：
-1. 语言干练犀利，直击要害，拒绝客套寒暄。
-2. 按照以下4部分严格结构化输出：
-- **【盘口与形态量化诊断】**：均线多空结构、主力资金意图、超买超卖状态；
-- **【估值与安全边际】**：当前价格安全性、向上赔率空间；
-- **【三大投资周期战术定调】**：短线T+1进出点、中线波段持有建议、长线仓位配置建议；
-- **【涨乐财富通实战挂单】**：给出具体挂单价格区间、分批止盈目标价、跌破何价位无条件止损。
+1. 用户尚未持有该股票！重点在于评估开仓盈亏比与时机选择。
+2. 拒绝任何客套，严格按如下4部分输出：
+### 一、 盘口形态与资金意图量化研判
+- 均线多空结构、主力资金进出信号、超买超卖评估。
+### 二、 估值安全边际与向上赔率测算
+- 当前价格位置的下行风险与向上弹性空间，盈亏比是否达到 3:1 以上。
+### 三、 实战操盘战术定调
+- 短线 T+1 进出场条件、中线波段加仓时机、长线价值配置仓位。
+### 四、 涨乐财富通实战挂单计划
+- 具体的挂单买入区间、分批止盈目标价、跌破何价位果断止损离场。
 """
             else:
                 holdings, watchlists = get_enriched_stocks()
@@ -1914,8 +2007,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
                     
                 payload = {"实战持仓股票池": holdings, "重点观察自选池": watchlists}
                 data_str = json.dumps(payload, ensure_ascii=False, indent=2)
-                prompt = f"""
-你是一名资深 A 股私募基金投资总监。请针对以下用户的【实战持仓】与【观察自选】数据，输出一份【极度精炼、纯干货、零废话】的全景操盘内参：
+                prompt = f"""你是一名资深 A 股私募基金投资总监。请针对以下用户的【实战持仓】与【观察自选】数据，输出一份【极度精炼、纯干货、零废话】的全景操盘内参：
 {data_str}
 
 【硬性要求】：
