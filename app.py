@@ -643,18 +643,11 @@ class UserManager:
                 }
                 self._write_json(self.users_file, users)
 
-            # 自动迁移旧版 my_portfolio.json 到 admin 的股票池中
+            # 初始化空股票池，确保干净无预设测试股票
             portfolios = self._read_json(self.portfolios_file, {})
             if "admin" not in portfolios:
-                pf_file = get_portfolio_path()
-                if os.path.exists(pf_file):
-                    try:
-                        with open(pf_file, "r", encoding="utf-8") as f:
-                            old_stocks = json.load(f)
-                        portfolios["admin"] = old_stocks
-                        self._write_json(self.portfolios_file, portfolios)
-                    except Exception:
-                        pass
+                portfolios["admin"] = []
+                self._write_json(self.portfolios_file, portfolios)
 
     def register(self, username, password, nickname=""):
         username = str(username).strip()
@@ -1542,7 +1535,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         // 渲染持仓列表
         const hBody = document.getElementById('holding-body');
         if (holdings.length === 0) {
-          hBody.innerHTML = '<tr><td colspan="9" class="text-center py-6 text-slate-500">加载中...</td></tr>';
+          hBody.innerHTML = '<tr><td colspan="9" class="text-center py-10 text-slate-500"><i class="fa-solid fa-folder-open text-2xl text-slate-600 mb-2 block"></i>暂无实战持仓标的，请在上方添加您的实战持仓股票</td></tr>';
         } else {
           hBody.innerHTML = holdings.map(item => {
             const isUp = item.profit_pct >= 0;
@@ -2666,6 +2659,15 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/auth/logout":
             self.send_json({"status": "success"})
+
+        elif path == "/api/stocks/clear_all":
+            user = self.get_current_user()
+            target_username = user["username"] if user else "admin"
+            user_manager.save_stock(target_username, {}) # or clear
+            p_data = user_manager._read_json(user_manager.portfolios_file, {})
+            p_data[target_username] = []
+            user_manager._write_json(user_manager.portfolios_file, p_data)
+            self.send_json({"status": "success", "message": "已全部清空！"})
 
         elif path == "/api/stock/save":
             user = self.get_current_user()
