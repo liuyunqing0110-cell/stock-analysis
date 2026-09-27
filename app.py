@@ -247,7 +247,7 @@ class HotspotService:
 2. **领涨行业与假期发酵逻辑的交叉印证**：
    - 结合下方领涨板块，指明哪些板块与假期间重大事件形成强烈共振，开盘具备持续爆发力；
    - 点评核心标的（进攻龙头、稳健中军、高性价比低价股）在事件驱动下的实战承接力；
-3. **“涨乐财富通”节后开盘交易纪律与执行挂单**：
+3. **节后开盘交易纪律与执行挂单**：
    - 针对开盘可能出现的“假期利好高开脉冲”，给出具体的防追高限价回踩买入区间、分批止盈条件单点位以及刚性止损红线。
 """
         if self.ai and hasattr(self.ai, "client") and self.ai.client:
@@ -724,14 +724,26 @@ HTML_CONTENT = """<!DOCTYPE html>
       border-left: 4px solid #f59e0b !important;
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4) !important;
     }
-    #single-ai-content h3, #all-ai-content h3, .markdown-body h3 {
+        #single-ai-content h3, #all-ai-content h3, .markdown-body h3 {
       font-size: 15px !important;
       font-weight: 800 !important;
       color: #f59e0b !important;
       margin-top: 24px !important;
-      margin-bottom: 12px !important;
+      margin-bottom: 6px !important;
       padding-left: 10px !important;
       border-left: 4px solid #3b82f6 !important;
+    }
+    #single-ai-content .section-desc, #all-ai-content .section-desc, .markdown-body .section-desc {
+      font-size: 12px !important;
+      color: #94a3b8 !important;
+      background: rgba(15, 23, 42, 0.75) !important;
+      border: 1px solid rgba(56, 189, 248, 0.25) !important;
+      border-left: 3px solid #38bdf8 !important;
+      padding: 6px 12px !important;
+      border-radius: 0 6px 6px 0 !important;
+      margin: 4px 0 12px 0 !important;
+      line-height: 1.5 !important;
+      display: block !important;
     }
 
   </style>
@@ -745,7 +757,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         <h1 class="text-2xl font-bold tracking-tight text-white">A股 AI 量化投资决策系统</h1>
         <span class="px-2.5 py-0.5 text-xs font-semibold bg-blue-500/20 text-blue-400 rounded-full border border-blue-500/30">模块全集成版</span>
       </div>
-      <p class="text-sm text-slate-400 mt-1">集成 K线图表 · 多因子评分 · 涨乐富点位 · 市场热点雷达 · DeepSeek 单股/全景投研</p>
+      <p class="text-sm text-slate-400 mt-1">集成 K线图表 · 多因子评分 · 操盘实战点位 · 市场热点雷达 · DeepSeek 单股/全景投研</p>
     </div>
     <div class="flex items-center gap-3 w-full md:w-auto">
       <button onclick="loadData()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
@@ -934,7 +946,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         <div id="kline-chart" style="width: 100%; height: 420px;"></div>
       </div>
 
-      <!-- 右侧 1 栏：多因子量化评分面板 (quant_factors) + 涨乐富点位 (trade_plan) -->
+      <!-- 右侧 1 栏：多因子量化评分面板 (quant_factors) + 操盘实战点位 (trade_plan) -->
       <div class="space-y-4">
         <!-- 评分卡片 -->
         <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800">
@@ -986,10 +998,10 @@ HTML_CONTENT = """<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- 涨乐富挂单与策略卡片 (trade_plan) -->
+        <!-- 实战操盘点位与策略卡片 (trade_plan) -->
         <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800">
           <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-            <i class="fa-solid fa-bullseye text-emerald-400"></i> 涨乐财富通·实战挂单指引 (trade_plan)
+            <i class="fa-solid fa-bullseye text-emerald-400"></i> 券商条件单·实战挂单指引 (trade_plan)
           </h4>
           <div id="trade-plan-content" class="text-xs space-y-2">
             <!-- 动态填充 -->
@@ -1049,6 +1061,8 @@ HTML_CONTENT = """<!DOCTYPE html>
       // 3. 自动在表格和标题前补空行，确保 Markdown 完美解析为原生 table 元素
       safeText = safeText.replace(new RegExp('([^' + LF + '|])' + LF + '(\\|.*?\\|)', 'g'), '$1' + LF + LF + '$2');
       safeText = safeText.replace(new RegExp('([^' + LF + '])' + LF + '(###\\s+)', 'g'), '$1' + LF + LF + '$2');
+      // 4. 将板块定位提示小字转换为美化指示条
+      safeText = safeText.replace(/\*💡\s*(.*?)\*/g, '<div class="section-desc">💡 $1</div>');
       return marked.parse(safeText);
     }
 
@@ -1980,6 +1994,20 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             target_code = body.get("code")
             target_symbol = body.get("symbol")
             
+            # 优先调用 modules/ai_advisor.py 专职投研模块
+            advisor_obj = None
+            if ai_advisor:
+                if hasattr(ai_advisor, "AIAdvisor"):
+                    try:
+                        advisor_obj = ai_advisor.AIAdvisor()
+                    except Exception:
+                        pass
+                elif hasattr(ai_advisor, "get_advisor"):
+                    try:
+                        advisor_obj = ai_advisor.get_advisor()
+                    except Exception:
+                        pass
+
             if target_code:
                 if not target_symbol:
                     target_symbol, target_code, _ = resolve_stock(target_code)
@@ -2006,6 +2034,13 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
                         pass
 
                 pct_today_str = f"{((curr_p - prev_c)/prev_c*100):+.2f}%" if prev_c else "0.00%"
+                plan = compute_trade_plan(curr_p, is_holding=bool(holding_item), cost=float(holding_item.get("成本价", 0.0)) if holding_item else 0.0)
+
+                # 优先委派给外部独立模块 modules/ai_advisor.py 运行
+                if advisor_obj and hasattr(advisor_obj, "diagnose_single_stock"):
+                    rep = advisor_obj.diagnose_single_stock(target_code, quote, scores, plan, holding_item)
+                    self.send_json({"report": rep})
+                    return
 
                 if holding_item:
                     # 【场景 A：实战持仓股】—— 全周期操盘实战指导（短线/中线/长线全方位覆盖 + 盈亏针对性应对）
@@ -2042,6 +2077,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 3. **第二步：紧接着输出以下四大紧凑表格（每张表必须包含标准表头和表格边框，每张表前后空一行）**：
 
 ### 一、 筹码分布与关键阻力支撑表
+*💡 【板块作用】：摸清战场地形，标定上方解套抛压天花板与下方多头防守地板，明确高抛低吸安全边界。*
 | 诊断维度 | 核心点位 / 数据 | 操盘手定性结论与实战含义 |
 | :--- | :--- | :--- |
 | 成本与现价 | 成本 {cost:.2f}元 vs 现价 {curr_p:.2f}元 | 当前盈亏 {profit_status}，分析筹码处于获利盘还是套牢区 |
@@ -2049,6 +2085,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 | 下方核心支撑带 | 具体价格区间 (如 做T买点/止损) | 多头最后防守位，跌破则趋势恶化 |
 
 ### 二、 三大持有周期实战操作决策表（短/中/长线）
+*💡 【板块作用】：时间与策略匹配，结合短线T+1、中线波段与长线价值评分，给出不同周期的具体仓位与点位打法。*
 | 周期类型与评分 | 核心点位规划 | 具体仓位动作与目标 |
 | :--- | :--- | :--- |
 | **⚡ 短线 T+1 ({scores.get('short_term', {}).get('score')}分)** | 做T买入: **{plan.get('t_buy')}元**<br>冲高卖出: **{plan.get('t_sell')}元** | 回踩低吸加仓，冲高必须T出底仓，赚差价降本，破止损严决减仓 |
@@ -2056,23 +2093,26 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 | **💎 长线价值 ({scores.get('long_term', {}).get('score')}分)** | 补仓点位:<br>一档: **xx元**<br>二档: **xx元** | 结合估值安全边际，评估长线回本目标价与金字塔分批布局计划 |
 
 ### 三、 账户当前实际盈亏针对性应对路线表
+*💡 【板块作用】：实操战术路线，针对当前实际盈亏制定日内做T降本、遇阻分批减仓与破位刚性保命的执行步骤。*
 | 战术步骤 | 触发价格条件 | 委托动作与仓位 | 战术目的与降本目标 |
 | :--- | :--- | :--- | :--- |
 | **步骤 1：日内做T降本** | 回踩至 **{plan.get('t_buy')}元** / 冲高至 **{plan.get('t_sell')}元** | 买入/卖出对应数量 | 测算每笔做T降低综合成本幅度 |
 | **步骤 2：阻力位减仓** | 达到上方第一技术阻力位 | 分批减仓比例 | 锁定反弹战果，防止回踩再度被套 |
 | **步骤 3：刚性风险防守** | 跌破 **{plan.get('hard_stop')}元** | 严格执行止损 | 绝不盲目死扛，守住本金底线 |
 
-### 四、 涨乐财富通条件单直接照抄清单
+### 四、 券商智能条件单直接照抄清单
+*💡 【板块作用】：手机券商执行单，将点位与股数直接照抄录入任意券商APP智能条件单（如同花顺/银河/中信/国泰君安等），由系统自动盯盘触发。*
 | 条件单类型 | 监控触发价格 | 委托操作与数量 | 监控有效期 | 战术目的 |
 | :--- | :--- | :--- | :--- | :--- |
 | 股价回落买入 (做T低吸) | 价格 <= **{plan.get('t_buy')}元** | 限价买入 xx股 | 当日有效 | 日内回踩低吸拉低成本 |
 | 股价反弹卖出 (做T冲高) | 价格 >= **{plan.get('t_sell')}元** | 限价卖出 xx股 | 当日有效 | 冲高获利兑现做T差价 |
 | 止损条件单 (防守底线) | 价格 <= **{plan.get('hard_stop')}元** | 市价/限价卖出全部 | 长期有效 | 破位刚性离场规避深套 |
+
 """
                 else:
                     # 【场景 B：观察自选 / 市场热点推荐标的】—— 启动左侧狙击与建仓计划
                     plan = compute_trade_plan(curr_p, is_holding=False, cost=0.0)
-                    prompt = f"""你是一名专业私募基金投资总监。请针对以下用户【尚未持仓的观察标的】，输出一份【顶置核心决策牌 + 4张结构化表格】的实战操盘策略。
+                    prompt = f"""你是一名专业私募基金投资总监。请针对以下用户【尚未持仓的观察标的】，输出一份【顶置三大核心决策牌 + 四大清晰结构化表格】的实战操盘策略。
 
 【标的技术面实时数据】：
 - 股票标的：{quote.get('name')} ({target_code})
@@ -2090,6 +2130,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 2. **第二步：紧接着输出以下四大紧凑表格（每张表控制在 2~3 列，手机竖屏单手阅读极佳）**：
 
 ### 一、 盘口形态与技术指标量化表
+*💡 【板块作用】：多空结构体检，量化均线排列、RSI超买超卖与量价动能，识别主力资金吸筹意图与爆发力。*
 | 分析维度 | 当前技术状态 | 主力资金意图与技术含义 |
 | :--- | :--- | :--- |
 | 均线多空结构 | MA5/20/60 排列形态 | 趋势方向与均线支撑阻力 |
@@ -2097,25 +2138,29 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 | 综合评级 | {scores.get('overall_grade')} | 明确是否具备入场赔率 |
 
 ### 二、 估值安全边际与向上赔率测算表
+*💡 【板块作用】：空间与盈亏比测算，明确向上两档目标获利空间与向下止损成本，评估是否具备高赔率入场价值。*
 | 估值与空间 | 点位规划 | 收益与风险评估结论 |
 | :--- | :--- | :--- |
 | 上行目标位 | 第一目标 **{plan.get('target1')}元** (+4.5%)<br>第二目标 **{plan.get('target2')}元** (+10%) | 测算向上弹性空间 |
 | 下行防守线 | 开仓止损 **{plan.get('stop_loss')}元** (-2.0%) | 潜在最大试错风险与盈亏比结论 |
 
-### 三、 三大周期操盘战术定调表
-| 周期类型与评分 | 建议仓位 | 进场与出场战术指令 |
-| :--- | :--- | :--- |
-| **⚡ 短线 T+1 ({scores.get('short_term', {}).get('score')}分)** | 2成机动仓 | 回踩买入区间低吸挂单，次日冲高落袋止盈 |
-| **🌊 中线波段 ({scores.get('mid_term', {}).get('score')}分)** | 3~4成仓位 | 顺应均线趋势持股，跌破关键防守位离场 |
-| **💎 长线价值 ({scores.get('long_term', {}).get('score')}分)** | 观望 / 底仓配置 | 结合估值安全边际，执行金字塔逢低分批建仓 |
+### 三、 三大周期操盘战术定调表（未持仓·建仓与出场规划）
+*💡 【板块作用】：实操建仓指南，明确非持仓标的在短线、中线、长线下该在什么点位买入、开多少仓、去哪里止盈与止损。*
+| 投资周期与评分 | 建议开仓仓位 | 计划买入点位 / 触发条件 | 目标止盈与防守止损线 |
+| :--- | :--- | :--- | :--- |
+| **⚡ 短线 T+1 ({scores.get('short_term', {}).get('score')}分)** | 1~2成机动仓 | 限价挂单 **{plan.get('buy_range')}元** 低吸（严禁追高追涨） | 冲高触及 **{plan.get('target1')}元** 次日落袋；跌破 **{plan.get('stop_loss')}元** 刚性止损 |
+| **🌊 中线波段 ({scores.get('mid_term', {}).get('score')}分)** | 3~4成主波段仓 | 等待缩量回踩至 MA20 (约 **{scores.get('ma20')}元**) 附近企稳吸筹 | 向上看波段目标 **{plan.get('target2')}元**；有效跌破 MA20 趋势破位离场 |
+| **💎 长线价值 ({scores.get('long_term', {}).get('score')}分)** | 2~3成底仓配置 | 结合历史估值分位，在 **{scores.get('ma60')}元** 附近逢低分两批金字塔挂单 | 长线看行业周期反转与估值修复；以大周期破位作为终极防守线 |
 
-### 四、 涨乐财富通实战挂单计划表
+### 四、 券商智能条件单实战挂单计划表
+*💡 【板块作用】：手机券商执行单，将限价买入、两档止盈与防守止损参数直接录入任意券商APP条件单，严格执行左侧潜伏纪律。*
 | 条件单类型 | 监控触发价格 | 委托数量 | 有效期 | 操盘目的 |
 | :--- | :--- | :--- | :--- | :--- |
 | 限价买入条件单 | 价格 <= **{plan.get('buy_range')}** | 计划底仓数量 | 当日有效 | 严格左侧低吸，防追高 |
 | 止盈条件单 (短线) | 价格 >= **{plan.get('target1')}元** | 卖出 1/2 仓位 | 长期有效 | 锁定第一波短线利润 |
 | 止盈条件单 (波段) | 价格 >= **{plan.get('target2')}元** | 卖出剩余仓位 | 长期有效 | 把握中线波段主升浪 |
 | 止损条件单 (刚性) | 价格 <= **{plan.get('stop_loss')}元** | 全部清仓离场 | 长期有效 | 刚性截断亏损，规避深套 |
+
 """
             else:
                 holdings, watchlists = get_enriched_stocks()
@@ -2123,6 +2168,12 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
                     self.send_json({"report": "⚠️ 当前未录入任何持仓或自选股票，请先在上方录入股票后再进行诊断！"})
                     return
                     
+                # 优先委派给外部独立模块 modules/ai_advisor.py 运行全景研判
+                if advisor_obj and hasattr(advisor_obj, "diagnose_portfolio"):
+                    rep = advisor_obj.diagnose_portfolio(holdings, watchlists)
+                    self.send_json({"report": rep})
+                    return
+
                 payload = {"实战持仓股票池": holdings, "重点观察自选池": watchlists}
                 data_str = json.dumps(payload, ensure_ascii=False, indent=2)
                 prompt = f"""你是一名资深 A 股私募基金投资总监。请针对以下用户的【实战持仓】与【观察自选】数据，输出一份【极度精炼、纯干货、零废话】的全景操盘内参：
@@ -2132,9 +2183,9 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 1. 严禁任何寒暄、称呼、情绪安慰等口水话；
 2. 直奔主题，按如下结构分模块输出：
 ### 一、 【实战持仓股】盘口诊断与减亏自救作战单
-- 对每只持仓股：盘口健康度、日内做 T 降本点位、加仓翻盘测算、涨乐财富通条件单设置。
+- 对每只持仓股：盘口健康度、日内做 T 降本点位、加仓翻盘测算、实战挂单与止盈止损规划。
 ### 二、 【重点观察自选股】量化狙击与上车计划
-- 对每只自选股：性价比评估、建议回踩低吸挂单区间、两档目标位、涨乐财富通挂单指引。
+- 对每只自选股：性价比评估、建议回踩低吸挂单区间、两档目标位、关键风控与挂单规划。
 """
 
             try:
