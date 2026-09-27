@@ -1299,7 +1299,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 
     async function checkAuthStatus() {
       if (!currentAuthToken) {
-        renderAuthHeader(null);
+        window.location.href = '/login.html';
         return;
       }
       try {
@@ -1318,7 +1318,18 @@ HTML_CONTENT = """<!DOCTYPE html>
       currentAuthToken = '';
       currentAuthUser = null;
       localStorage.removeItem('stock_auth_token');
-      renderAuthHeader(null);
+      window.location.href = '/login.html';
+    }
+
+    function showLockScreen() {
+      const lockOverlay = document.getElementById('lock-screen-overlay');
+      if (lockOverlay) lockOverlay.classList.remove('hidden');
+      openAuthModal('register');
+    }
+
+    function hideLockScreen() {
+      const lockOverlay = document.getElementById('lock-screen-overlay');
+      if (lockOverlay) lockOverlay.classList.add('hidden');
     }
 
     function renderAuthHeader(user) {
@@ -1476,9 +1487,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       currentAuthToken = '';
       currentAuthUser = null;
       localStorage.removeItem('stock_auth_token');
-      renderAuthHeader(null);
-      alert("已安全退出！");
-      loadData();
+      window.location.href = '/login.html';
     }
 
     // ==================== APP 扫码下载弹窗 ====================
@@ -1513,6 +1522,17 @@ HTML_CONTENT = """<!DOCTYPE html>
       try {
         const res = await fetchWithAuth('/api/stocks');
         const data = await res.json();
+        if (data.need_login) {
+          showLockScreen();
+          const hBody = document.getElementById('holding-body');
+          if (hBody) hBody.innerHTML = '<tr><td colspan="9" class="text-center py-8 text-slate-500"><i class="fa-solid fa-lock text-amber-400 mr-2"></i>专属股票池已安全锁定，请先登录/注册查看</td></tr>';
+          const wBody = document.getElementById('watchlist-body');
+          if (wBody) wBody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-500"><i class="fa-solid fa-lock text-amber-400 mr-2"></i>专属股票池已安全锁定，请先登录/注册查看</td></tr>';
+          document.getElementById('count-holding').innerText = '0';
+          document.getElementById('count-watchlist').innerText = '0';
+          return;
+        }
+        hideLockScreen();
         const holdings = data.holdings || [];
         const watchlists = data.watchlists || [];
 
@@ -2330,6 +2350,21 @@ HTML_CONTENT = """<!DOCTYPE html>
     </div>
   </div>
 
+
+  <!-- 未登录全屏毛玻璃锁定安全遮罩 -->
+  <div id="lock-screen-overlay" class="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-40 flex items-center justify-center p-4 hidden pointer-events-none">
+    <div class="text-center p-6 rounded-2xl border border-blue-500/30 bg-slate-900/90 shadow-2xl max-w-sm pointer-events-auto">
+      <div class="w-14 h-14 mx-auto mb-3 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-2xl border border-blue-500/30">
+        <i class="fa-solid fa-user-lock"></i>
+      </div>
+      <h3 class="text-lg font-bold text-white mb-1.5">私有量化空间已锁定</h3>
+      <p class="text-xs text-slate-400 mb-4">系统已开启多用户数据隔离保护，请先登录或注册您的专属操盘账号。</p>
+      <button onclick="openAuthModal('login')" class="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm transition shadow-lg shadow-blue-600/30">
+        立即登录 / 注册
+      </button>
+    </div>
+  </div>
+
 </body>
 </html>
 """
@@ -2456,6 +2491,21 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(HTML_CONTENT.encode("utf-8"))
 
+        elif path in ["/login", "/login.html"]:
+            login_file = os.path.join(CURRENT_DIR, "login.html")
+            if os.path.exists(login_file):
+                with open(login_file, "rb") as f:
+                    login_data = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(login_data)))
+                self.end_headers()
+                self.wfile.write(login_data)
+            else:
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.end_headers()
+
 
 
         elif path in ["/download", "/app", "/download.html"]:
@@ -2499,14 +2549,12 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/stocks":
             user = self.get_current_user()
-            if user:
-                user_stocks = user_manager.get_stocks(user["username"])
-                holdings, watchlists = get_enriched_stocks(user_stocks)
-                self.send_json({"holdings": holdings, "watchlists": watchlists, "user": user})
-            else:
-                guest_stocks = user_manager.get_stocks("admin")
-                holdings, watchlists = get_enriched_stocks(guest_stocks)
-                self.send_json({"holdings": holdings, "watchlists": watchlists, "is_guest": True})
+            if not user:
+                self.send_json({"holdings": [], "watchlists": [], "need_login": True, "message": "未登录，请先登录或注册！"})
+                return
+            user_stocks = user_manager.get_stocks(user["username"])
+            holdings, watchlists = get_enriched_stocks(user_stocks)
+            self.send_json({"holdings": holdings, "watchlists": watchlists, "user": user})
 
         elif path == "/api/stock/analysis":
             code = _get(query_params.get("code", [""]), 0).strip()
@@ -2621,7 +2669,10 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/stock/save":
             user = self.get_current_user()
-            target_username = user["username"] if user else "admin"
+            if not user:
+                self.send_json({"status": "error", "message": "🔒 系统已开启安全隔离，请先登录或注册您的专属账号！"})
+                return
+            target_username = user["username"]
             
             raw_c = body.get("code")
             raw_n = body.get("name")
@@ -2645,7 +2696,10 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/stock/delete":
             user = self.get_current_user()
-            target_username = user["username"] if user else "admin"
+            if not user:
+                self.send_json({"status": "error", "message": "🔒 请先登录！"})
+                return
+            target_username = user["username"]
             code = body.get("code")
             user_manager.delete_stock(target_username, code)
             self.send_json({"status": "success", "username": target_username})

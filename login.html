@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>登录 / 注册 - A股 AI 量化投资与全端决策系统</title>
+  <!-- Tailwind CSS & FontAwesome Icons & QRCode -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <style>
+    body {
+      background-color: #080e1e;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(30, 58, 138, 0.25) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.15) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.8) 0px, transparent 100%);
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      min-height: 100vh;
+    }
+    .glass-box {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+    }
+    .tab-active {
+      color: #38bdf8;
+      border-bottom: 2px solid #38bdf8;
+    }
+  </style>
+</head>
+<body class="flex flex-col justify-between items-center p-4 md:p-8">
+
+  <!-- 顶部轻量 Logo 栏 -->
+  <header class="w-full max-w-5xl flex justify-between items-center py-4 mb-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-emerald-400 p-0.5 shadow-lg shadow-blue-500/30">
+        <div class="w-full h-full bg-slate-900 rounded-xl flex items-center justify-center">
+          <i class="fa-solid fa-chart-line text-lg text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400"></i>
+        </div>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-white leading-tight">A股 AI 量化投资决策系统</h1>
+        <p class="text-[11px] text-slate-400">专业级操盘手实战终端 · 个人独立私有空间</p>
+      </div>
+    </div>
+
+    <!-- 手机 App 下载入口 -->
+    <a href="/download" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-700 transition flex items-center gap-1.5 shadow-sm">
+      <i class="fa-solid fa-mobile-screen-button text-emerald-400"></i>
+      <span>安卓手机 APP</span>
+    </a>
+  </header>
+
+  <!-- 主视觉区：左右分栏（大屏）/ 单栏居中（手机） -->
+  <main class="w-full max-w-5xl my-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-center py-4">
+    
+    <!-- 左侧：系统核心亮点宣传介绍 (大屏显示) -->
+    <div class="lg:col-span-7 space-y-6 text-left pr-0 lg:pr-6 hidden lg:block">
+      <div class="inline-flex items-center gap-2 px-3 py-1 bg-blue-500/10 text-blue-400 rounded-full border border-blue-500/20 text-xs font-medium">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        深度集成 DeepSeek 操盘大模型与多因子量化
+      </div>
+      
+      <h2 class="text-3xl font-extrabold text-white tracking-tight leading-snug">
+        让每一位投资者拥有专属的<br>
+        <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-sky-300 to-emerald-400">AI 操盘大脑与量化独立账本</span>
+      </h2>
+
+      <p class="text-slate-400 text-sm leading-relaxed max-w-lg">
+        打破传统股票软件杂乱信息干扰。从盘口均线、量价动能到做 T 买卖点位测算，系统针对您的实战持仓与观察自选，输出机构级决策内参。
+      </p>
+
+      <!-- 核心四大价值卡片 -->
+      <div class="grid grid-cols-2 gap-3.5 pt-2">
+        <div class="glass-box p-3.5 rounded-xl border border-slate-800">
+          <div class="flex items-center gap-2 text-blue-400 text-sm font-bold mb-1">
+            <i class="fa-solid fa-bullseye"></i> 操盘实战买卖点
+          </div>
+          <p class="text-[12px] text-slate-400 leading-normal">日内做T买点、冲高压力位、刚性防守止损线自动精准测算。</p>
+        </div>
+
+        <div class="glass-box p-3.5 rounded-xl border border-slate-800">
+          <div class="flex items-center gap-2 text-emerald-400 text-sm font-bold mb-1">
+            <i class="fa-solid fa-brain"></i> DeepSeek 操盘内参
+          </div>
+          <p class="text-[12px] text-slate-400 leading-normal">顶置三大核心决策牌，针对浮亏被套给出做T解套自救路线。</p>
+        </div>
+
+        <div class="glass-box p-3.5 rounded-xl border border-slate-800">
+          <div class="flex items-center gap-2 text-amber-400 text-sm font-bold mb-1">
+            <i class="fa-solid fa-chart-simple"></i> 多周期量化评分
+          </div>
+          <p class="text-[12px] text-slate-400 leading-normal">短线T+1、中线波段与长线价值三维度客观评级，绝不追高。</p>
+        </div>
+
+        <div class="glass-box p-3.5 rounded-xl border border-slate-800">
+          <div class="flex items-center gap-2 text-purple-400 text-sm font-bold mb-1">
+            <i class="fa-solid fa-shield-halved"></i> 个人私有数据隔离
+          </div>
+          <p class="text-[12px] text-slate-400 leading-normal">每位用户独立账户保险箱，持仓与自选完全私密，手机电脑实时同步。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧：登录与注册核心卡片 -->
+    <div class="lg:col-span-5 w-full max-w-md mx-auto">
+      <div class="glass-box rounded-2xl p-6 md:p-8 shadow-2xl relative border border-slate-700/80">
+        
+        <!-- 登录 / 注册 Tab 切换 -->
+        <div class="flex border-b border-slate-700/80 pb-3 mb-6">
+          <button id="tab-login" onclick="switchTab('login')" class="flex-1 text-center py-2 text-base font-bold tab-active transition">
+            账号登录
+          </button>
+          <button id="tab-register" onclick="switchTab('register')" class="flex-1 text-center py-2 text-base font-bold text-slate-400 hover:text-white transition">
+            新用户注册
+          </button>
+        </div>
+
+        <!-- 表单区域 -->
+        <form id="auth-form" onsubmit="handleAuthSubmit(event)" class="space-y-4">
+          
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+              <span>账号 / 手机号</span>
+              <span class="text-[11px] text-slate-500 font-normal">支持手机号或自定义账号</span>
+            </label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                <i class="fa-solid fa-user"></i>
+              </span>
+              <input type="text" id="inp-username" required placeholder="请输入手机号或账号"
+                     class="w-full bg-slate-800/90 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition">
+            </div>
+          </div>
+
+          <!-- 注册专有：昵称 -->
+          <div id="wrap-nickname" class="hidden">
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+              <span>您的投资昵称 (选填)</span>
+              <span class="text-[11px] text-slate-500 font-normal">例如：操盘手小李</span>
+            </label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                <i class="fa-solid fa-id-card"></i>
+              </span>
+              <input type="text" id="inp-nickname" placeholder="设置一个响亮的投资昵称"
+                     class="w-full bg-slate-800/90 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+              <span>登录密码</span>
+              <span class="text-[11px] text-slate-500 font-normal">至少 4 位字符</span>
+            </label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                <i class="fa-solid fa-lock"></i>
+              </span>
+              <input type="password" id="inp-password" required placeholder="请输入登录密码"
+                     class="w-full bg-slate-800/90 border border-slate-700 rounded-xl pl-9 pr-10 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition">
+              <button type="button" onclick="togglePasswordVis()" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300">
+                <i id="eye-icon" class="fa-solid fa-eye-slash text-xs"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 错误提醒条 -->
+          <div id="error-alert" class="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs hidden"></div>
+
+          <!-- 提交大按钮 -->
+          <button type="submit" id="btn-submit"
+                  class="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm shadow-lg shadow-blue-600/30 transition flex items-center justify-center gap-2">
+            <span id="btn-text">立即登录操盘系统</span>
+            <i class="fa-solid fa-arrow-right text-xs"></i>
+          </button>
+        </form>
+
+        <!-- 底部快捷功能 -->
+        <div class="mt-6 pt-5 border-t border-slate-700/60 text-center">
+          <button onclick="toggleQrBox()" class="text-xs text-slate-400 hover:text-emerald-400 transition inline-flex items-center gap-1.5">
+            <i class="fa-solid fa-qrcode text-emerald-400 text-sm"></i>
+            <span>发给朋友？点击查看【手机扫码直达二维码】</span>
+          </button>
+          
+          <div id="qr-box" class="mt-4 p-4 bg-white rounded-2xl shadow-xl inline-block hidden">
+            <div id="page-qrcode" class="mx-auto flex justify-center"></div>
+            <p class="text-xs text-slate-800 font-bold mt-2">手机微信 / 相机扫码直达注册</p>
+            <p class="text-[10px] text-slate-500">截屏直接发送给好友即可体验</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- 页脚版权与免责声明 -->
+  <footer class="w-full max-w-5xl py-4 border-t border-slate-800/80 text-center text-xs text-slate-500">
+    <p>A股 AI 量化投资与全端决策系统 · 数据仅供量化推演与技术分析参考，不构成任何直接投资建议 · 股市有风险，入市需谨慎</p>
+  </footer>
+
+  <script>
+    let currentMode = 'login';
+    let qrGenerated = false;
+
+    // 检查如果已登录，直接跳转到主系统
+    const existingToken = localStorage.getItem('stock_auth_token');
+    if (existingToken) {
+      fetch('/api/auth/me', {
+        headers: { 'Authorization': 'Bearer ' + existingToken }
+      }).then(res => res.json()).then(data => {
+        if (data.status === 'success') {
+          window.location.href = '/';
+        }
+      }).catch(() => {});
+    }
+
+    // 检查 URL 参数是否带有 ?action=register
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('action') === 'register') {
+      switchTab('register');
+    }
+
+    function switchTab(mode) {
+      currentMode = mode;
+      const tabLogin = document.getElementById('tab-login');
+      const tabReg = document.getElementById('tab-register');
+      const nickWrap = document.getElementById('wrap-nickname');
+      const btnText = document.getElementById('btn-text');
+      const errBox = document.getElementById('error-alert');
+      errBox.classList.add('hidden');
+
+      if (mode === 'login') {
+        tabLogin.className = "flex-1 text-center py-2 text-base font-bold tab-active transition cursor-pointer";
+        tabReg.className = "flex-1 text-center py-2 text-base font-bold text-slate-400 hover:text-white transition cursor-pointer";
+        nickWrap.classList.add('hidden');
+        btnText.innerText = "立即登录操盘系统";
+      } else {
+        tabReg.className = "flex-1 text-center py-2 text-base font-bold tab-active transition cursor-pointer";
+        tabLogin.className = "flex-1 text-center py-2 text-base font-bold text-slate-400 hover:text-white transition cursor-pointer";
+        nickWrap.classList.remove('hidden');
+        btnText.innerText = "立即注册开通我的股票池";
+      }
+    }
+
+    function togglePasswordVis() {
+      const inp = document.getElementById('inp-password');
+      const icon = document.getElementById('eye-icon');
+      if (inp.type === 'password') {
+        inp.type = 'text';
+        icon.className = 'fa-solid fa-eye text-xs text-blue-400';
+      } else {
+        inp.type = 'password';
+        icon.className = 'fa-solid fa-eye-slash text-xs';
+      }
+    }
+
+    function toggleQrBox() {
+      const box = document.getElementById('qr-box');
+      if (box.classList.contains('hidden')) {
+        box.classList.remove('hidden');
+        if (!qrGenerated) {
+          const qrEl = document.getElementById('page-qrcode');
+          const targetUrl = window.location.origin + '/login.html?action=register';
+          try {
+            new QRCode(qrEl, {
+              text: targetUrl,
+              width: 140,
+              height: 140,
+              colorDark: "#0f172a",
+              colorLight: "#ffffff",
+              correctLevel: QRCode.CorrectLevel.M
+            });
+            qrGenerated = true;
+          } catch(e) {
+            qrEl.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(targetUrl)}" class="w-[140px] h-[140px]">`;
+            qrGenerated = true;
+          }
+        }
+      } else {
+        box.classList.add('hidden');
+      }
+    }
+
+    async function handleAuthSubmit(e) {
+      e.preventDefault();
+      const username = document.getElementById('inp-username').value.trim();
+      const password = document.getElementById('inp-password').value.trim();
+      const nickname = document.getElementById('inp-nickname').value.trim();
+      const errBox = document.getElementById('error-alert');
+      const btn = document.getElementById('btn-submit');
+
+      if (!username || username.length < 2) {
+        errBox.innerText = "请输入有效的账号或手机号 (至少2位)";
+        errBox.classList.remove('hidden');
+        return;
+      }
+      if (!password || password.length < 4) {
+        errBox.innerText = "密码长度不能少于 4 位字符";
+        errBox.classList.remove('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.classList.add('opacity-70');
+      errBox.classList.add('hidden');
+
+      const url = currentMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, nickname })
+        });
+        const data = await res.json();
+        if (data.status === 'success' && data.token) {
+          localStorage.setItem('stock_auth_token', data.token);
+          // 跳转到主工作台
+          window.location.href = '/';
+        } else {
+          let msg = data.message || "请求失败，请稍后重试";
+          if (msg.includes("账号不存在")) {
+            errBox.innerHTML = `${msg} <a href="javascript:switchTab('register')" class="text-blue-400 font-bold underline ml-1">点此直接一键注册</a>`;
+          } else if (msg.includes("已存在")) {
+            errBox.innerHTML = `${msg} <a href="javascript:switchTab('login')" class="text-blue-400 font-bold underline ml-1">点此直接登录</a>`;
+          } else {
+            errBox.innerText = msg;
+          }
+          errBox.classList.remove('hidden');
+        }
+      } catch (err) {
+        errBox.innerText = "网络连线异常: " + err;
+        errBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-70');
+      }
+    }
+  </script>
+</body>
+</html>
