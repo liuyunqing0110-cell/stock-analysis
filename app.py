@@ -1,3 +1,8 @@
+import random
+import threading
+import hashlib
+import uuid
+import time
 from datetime import datetime
 import os
 import json
@@ -590,15 +595,178 @@ def get_hotspot_ai_review():
         return f"❌ 调用 DeepSeek 全周期推演失败: {e}"
 
 
-def get_enriched_stocks():
-    pf_file = get_portfolio_path()
-    stocks = []
-    if os.path.exists(pf_file):
+
+# ==================== 多用户数据与鉴权管理 (UserManager) ====================
+class UserManager:
+    def __init__(self, data_dir=CURRENT_DIR):
+        self.data_dir = data_dir
+        self.users_file = os.path.join(data_dir, "users.json")
+        self.portfolios_file = os.path.join(data_dir, "user_portfolios.json")
+        self.lock = threading.Lock()
+        self.salt = "stock_quant_secure_salt_2026"
+        self._init_data()
+
+    def _hash(self, pwd):
+        return hashlib.sha256((pwd + self.salt).encode("utf-8")).hexdigest()
+
+    def _read_json(self, path, default):
+        if not os.path.exists(path):
+            return default
         try:
-            with open(pf_file, "r", encoding="utf-8") as f:
-                stocks = json.load(f)
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return default
+
+    def _write_json(self, path, data):
+        tmp_path = path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
         except Exception:
             pass
+
+    def _init_data(self):
+        with self.lock:
+            users = self._read_json(self.users_file, {})
+            # 确保默认管理员存在 (admin / 888888)
+            if "admin" not in users:
+                token = str(uuid.uuid4()).replace("-", "")
+                users["admin"] = {
+                    "id": "admin",
+                    "username": "admin",
+                    "password_hash": self._hash("888888"),
+                    "nickname": "总舵主 (管理员)",
+                    "token": token,
+                    "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                self._write_json(self.users_file, users)
+
+            # 自动迁移旧版 my_portfolio.json 到 admin 的股票池中
+            portfolios = self._read_json(self.portfolios_file, {})
+            if "admin" not in portfolios:
+                pf_file = get_portfolio_path()
+                if os.path.exists(pf_file):
+                    try:
+                        with open(pf_file, "r", encoding="utf-8") as f:
+                            old_stocks = json.load(f)
+                        portfolios["admin"] = old_stocks
+                        self._write_json(self.portfolios_file, portfolios)
+                    except Exception:
+                        pass
+
+    def register(self, username, password, nickname=""):
+        username = str(username).strip()
+        password = str(password).strip()
+        if not username or len(username) < 2:
+            return None, "账号名称不能少于 2 位字符"
+        if not password or len(password) < 4:
+            return None, "密码长度不能少于 4 位字符"
+        with self.lock:
+            users = self._read_json(self.users_file, {})
+            if username in users:
+                return None, "该账号已存在，请直接登录！"
+            uid = f"user_{int(time.time()*1000)}"
+            token = str(uuid.uuid4()).replace("-", "")
+            users[username] = {
+                "id": uid,
+                "username": username,
+                "password_hash": self._hash(password),
+                "nickname": nickname.strip() or username,
+                "token": token,
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            self._write_json(self.users_file, users)
+            return {"username": username, "nickname": users[username]["nickname"], "token": token}, ""
+
+    def login(self, username, password):
+        username = str(username).strip()
+        password = str(password).strip()
+        with self.lock:
+            users = self._read_json(self.users_file, {})
+            user = users.get(username)
+            if not user:
+                return None, "账号不存在，请先注册！"
+            if user["password_hash"] != self._hash(password):
+                return None, "密码错误，请核对后重试！"
+            token = str(uuid.uuid4()).replace("-", "")
+            user["token"] = token
+            self._write_json(self.users_file, users)
+            return {"username": username, "nickname": user.get("nickname") or username, "token": token}, ""
+
+    def get_user_by_token(self, token):
+        if not token:
+            return None
+        with self.lock:
+            users = self._read_json(self.users_file, {})
+            for u in users.values():
+                if u.get("token") == token:
+                    return {"username": u["username"], "nickname": u.get("nickname") or u["username"], "id": u.get("id")}
+        return None
+
+    def get_stocks(self, username):
+        with self.lock:
+            p_data = self._read_json(self.portfolios_file, {})
+            return p_data.get(username, [])
+
+    def save_stock(self, username, stock_item):
+        with self.lock:
+            p_data = self._read_json(self.portfolios_file, {})
+            user_stocks = p_data.get(username, [])
+            code = stock_item.get("代码")
+            updated = False
+            for s in user_stocks:
+                if s.get("代码") == code:
+                    s.update(stock_item)
+                    updated = True
+                    break
+            if not updated:
+                user_stocks.append(stock_item)
+            p_data[username] = user_stocks
+            self._write_json(self.portfolios_file, p_data)
+
+    def delete_stock(self, username, code):
+        with self.lock:
+            p_data = self._read_json(self.portfolios_file, {})
+            user_stocks = p_data.get(username, [])
+            p_data[username] = [s for s in user_stocks if s.get("代码") != code]
+            self._write_json(self.portfolios_file, p_data)
+
+    def get_or_create_wechat_user(self, username, nickname, openid):
+        with self.lock:
+            users = self._read_json(self.users_file, {})
+            if username in users:
+                user = users[username]
+                token = str(uuid.uuid4()).replace("-", "")
+                user["token"] = token
+                self._write_json(self.users_file, users)
+                return {"username": username, "nickname": user.get("nickname") or nickname, "token": token}, ""
+            else:
+                uid = f"user_{int(time.time()*1000)}"
+                token = str(uuid.uuid4()).replace("-", "")
+                users[username] = {
+                    "id": uid,
+                    "username": username,
+                    "password_hash": self._hash("wechat_auto_login"),
+                    "nickname": nickname,
+                    "openid": openid,
+                    "token": token,
+                    "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                self._write_json(self.users_file, users)
+                return {"username": username, "nickname": nickname, "token": token}, ""
+
+
+# ==================== 微信公众号扫码验证码缓存 ====================
+wechat_auth_codes = {}  # code -> { openid, expires, created_at }
+WECHAT_TOKEN = "stockquant2026"
+
+user_manager = UserManager()
+
+def get_enriched_stocks(stocks=None):
+    if stocks is None:
+        stocks = user_manager.get_stocks("admin")
         
     portfolio_list = []
     watchlist_list = []
@@ -759,12 +927,22 @@ HTML_CONTENT = """<!DOCTYPE html>
       </div>
       <p class="text-sm text-slate-400 mt-1">集成 K线图表 · 多因子评分 · 操盘实战点位 · 市场热点雷达 · DeepSeek 单股/全景投研</p>
     </div>
-    <div class="flex items-center gap-3 w-full md:w-auto">
-      <button onclick="loadData()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
-        <i class="fa-solid fa-rotate"></i> 刷新列表
+    <div class="flex items-center gap-2.5 w-full md:w-auto flex-wrap">
+      <!-- 手机APP下载与扫码 -->
+      <button onclick="openDownloadModal()" class="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-1.5 shadow-sm">
+        <i class="fa-solid fa-mobile-screen-button"></i> 手机APP
       </button>
-      <button onclick="triggerAllAIDiagnose()" id="btn-ai-all" class="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2">
-        <i class="fa-solid fa-list-check"></i> 全仓一键诊断
+      <!-- 用户登录状态插槽 -->
+      <div id="auth-header-slot" class="flex items-center gap-2">
+        <button onclick="openAuthModal('login')" class="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-sm font-semibold transition flex items-center gap-1.5 shadow-md shadow-blue-500/20">
+          <i class="fa-solid fa-user-circle"></i> 登录/注册
+        </button>
+      </div>
+      <button onclick="loadData()" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition flex items-center justify-center gap-1.5">
+        <i class="fa-solid fa-rotate"></i> 刷新
+      </button>
+      <button onclick="triggerAllAIDiagnose()" id="btn-ai-all" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-1.5">
+        <i class="fa-solid fa-list-check"></i> 全仓诊断
       </button>
     </div>
   </header>
@@ -1102,9 +1280,254 @@ HTML_CONTENT = """<!DOCTYPE html>
       }
     }
 
+    
+    // ==================== 多用户鉴权与状态管理 ====================
+    let currentAuthToken = localStorage.getItem('stock_auth_token') || '';
+    let currentAuthUser = null;
+    let authModalMode = 'login';
+    let qrcodeInstance = null;
+
+    function getAuthHeaders(headers = {}) {
+      const h = { ...headers };
+      if (currentAuthToken) {
+        h['Authorization'] = 'Bearer ' + currentAuthToken;
+      }
+      return h;
+    }
+
+    async function fetchWithAuth(url, options = {}) {
+      options.headers = getAuthHeaders(options.headers || {});
+      return fetch(url, options);
+    }
+
+    async function checkAuthStatus() {
+      if (!currentAuthToken) {
+        renderAuthHeader(null);
+        return;
+      }
+      try {
+        const res = await fetchWithAuth('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 'success' && data.user) {
+            currentAuthUser = data.user;
+            renderAuthHeader(currentAuthUser);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("Auth check error:", e);
+      }
+      currentAuthToken = '';
+      currentAuthUser = null;
+      localStorage.removeItem('stock_auth_token');
+      renderAuthHeader(null);
+    }
+
+    function renderAuthHeader(user) {
+      const slot = document.getElementById('auth-header-slot');
+      if (!slot) return;
+      if (user) {
+        slot.innerHTML = `
+          <div class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 text-blue-300 rounded-lg text-xs font-semibold border border-blue-500/30">
+            <i class="fa-solid fa-user-check text-emerald-400"></i>
+            <span>${user.nickname || user.username}</span>
+          </div>
+          <button onclick="handleLogout()" class="px-2 py-1.5 bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 rounded-lg text-xs font-medium border border-slate-700 transition">
+            退出
+          </button>
+        `;
+      } else {
+        slot.innerHTML = `
+          <button onclick="openAuthModal('login')" class="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-sm font-semibold transition flex items-center gap-1.5 shadow-md shadow-blue-500/20">
+            <i class="fa-solid fa-user-circle"></i> 登录/注册
+          </button>
+        `;
+      }
+    }
+
+    function openAuthModal(mode = 'login') {
+      authModalMode = mode;
+      switchAuthTab(mode);
+      const errEl = document.getElementById('auth-error-msg');
+      if (errEl) errEl.classList.add('hidden');
+      const m = document.getElementById('modal-auth');
+      if (m) m.classList.remove('hidden');
+    }
+
+    function closeAuthModal() {
+      const m = document.getElementById('modal-auth');
+      if (m) m.classList.add('hidden');
+    }
+
+    function switchAuthTab(mode) {
+      const tabWx = document.getElementById('tab-auth-wechat');
+      const tabAcc = document.getElementById('tab-auth-account');
+      const panelWx = document.getElementById('panel-auth-wechat');
+      const panelAcc = document.getElementById('panel-auth-account');
+      const errWx = document.getElementById('wechat-error-msg');
+      const errAcc = document.getElementById('auth-error-msg');
+      if (errWx) errWx.classList.add('hidden');
+      if (errAcc) errAcc.classList.add('hidden');
+
+      if (mode === 'wechat') {
+        if (tabWx) tabWx.className = "text-sm font-bold text-emerald-400 border-b-2 border-emerald-500 pb-1 cursor-pointer flex items-center gap-1.5";
+        if (tabAcc) tabAcc.className = "text-sm font-bold text-slate-400 hover:text-white pb-1 cursor-pointer flex items-center gap-1.5";
+        if (panelWx) panelWx.classList.remove('hidden');
+        if (panelAcc) panelAcc.classList.add('hidden');
+      } else {
+        if (tabAcc) tabAcc.className = "text-sm font-bold text-blue-400 border-b-2 border-blue-500 pb-1 cursor-pointer flex items-center gap-1.5";
+        if (tabWx) tabWx.className = "text-sm font-bold text-slate-400 hover:text-white pb-1 cursor-pointer flex items-center gap-1.5";
+        if (panelAcc) panelAcc.classList.remove('hidden');
+        if (panelWx) panelWx.classList.add('hidden');
+      }
+    }
+
+    
+    async function submitWeChatCodeLogin() {
+      const inp = document.getElementById('wechat-verify-code');
+      const errEl = document.getElementById('wechat-error-msg');
+      const code = inp ? inp.value.trim() : '';
+      if (!code || code.length !== 6) {
+        if (errEl) { errEl.innerText = "请输入完整的 6 位数字验证码"; errEl.classList.remove('hidden'); }
+        return;
+      }
+      if (errEl) errEl.classList.add('hidden');
+      try {
+        const res = await fetch('/api/auth/wechat_code_login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code })
+        });
+        const data = await res.json();
+        if (data.status === 'success' && data.token) {
+          currentAuthToken = data.token;
+          currentAuthUser = data.user;
+          localStorage.setItem('stock_auth_token', currentAuthToken);
+          renderAuthHeader(currentAuthUser);
+          closeAuthModal();
+          alert(`🎉 微信扫码验证成功！欢迎进入【${currentAuthUser.nickname || '您的专属空间'}】。`);
+          loadData();
+        } else {
+          if (errEl) { errEl.innerText = data.message || "验证码不存在或已超时"; errEl.classList.remove('hidden'); }
+        }
+      } catch (e) {
+        if (errEl) { errEl.innerText = "网络连线异常: " + e; errEl.classList.remove('hidden'); }
+      }
+    }
+
+    let isRegisterSubMode = false;
+    function toggleRegisterSubMode() {
+      isRegisterSubMode = !isRegisterSubMode;
+      const nickWrap = document.getElementById('auth-nickname-wrap');
+      const btn = document.getElementById('btn-submit-auth');
+      const toggleTxt = document.getElementById('sub-mode-toggle');
+      if (isRegisterSubMode) {
+        nickWrap.classList.remove('hidden');
+        btn.innerText = "立即注册新账号";
+        toggleTxt.innerText = "已有账号？返回登录";
+      } else {
+        nickWrap.classList.add('hidden');
+        btn.innerText = "立即登录";
+        toggleTxt.innerText = "没有账号？点此注册";
+      }
+    }
+
+    async function submitAuth() {
+      const uEl = document.getElementById('auth-username');
+      const pEl = document.getElementById('auth-password');
+      const nEl = document.getElementById('auth-nickname');
+      const username = uEl ? uEl.value.trim() : '';
+      const password = pEl ? pEl.value.trim() : '';
+      const nickname = nEl ? nEl.value.trim() : '';
+      const errEl = document.getElementById('auth-error-msg');
+      const btn = document.getElementById('btn-submit-auth');
+
+      if (!username || username.length < 2) {
+        if (errEl) { errEl.innerText = "请输入有效的手机号或账号 (至少2位)"; errEl.classList.remove('hidden'); }
+        return;
+      }
+      if (!password || password.length < 4) {
+        if (errEl) { errEl.innerText = "密码长度不能少于 4 位"; errEl.classList.remove('hidden'); }
+        return;
+      }
+
+      if (btn) { btn.disabled = true; btn.innerText = "正在提交..."; }
+      if (errEl) errEl.classList.add('hidden');
+
+      const url = authModalMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, nickname })
+        });
+        const data = await res.json();
+        if (data.status === 'success' && data.token) {
+          currentAuthToken = data.token;
+          currentAuthUser = data.user;
+          localStorage.setItem('stock_auth_token', currentAuthToken);
+          renderAuthHeader(currentAuthUser);
+          closeAuthModal();
+          alert(authModalMode === 'login' ? `欢迎回来，${currentAuthUser.nickname || currentAuthUser.username}！` : `注册成功！已为您建立专属个人股票池。`);
+          loadData();
+        } else {
+          if (errEl) { errEl.innerText = data.message || "请求失败，请稍后重试"; errEl.classList.remove('hidden'); }
+        }
+      } catch (e) {
+        if (errEl) { errEl.innerText = "网络连线异常: " + e; errEl.classList.remove('hidden'); }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = authModalMode === 'login' ? "立即登录" : "立即注册开通我的股票池";
+        }
+      }
+    }
+
+    async function handleLogout() {
+      if (!confirm("确定要退出当前账号吗？")) return;
+      try {
+        await fetchWithAuth('/api/auth/logout', { method: 'POST' });
+      } catch (e) {}
+      currentAuthToken = '';
+      currentAuthUser = null;
+      localStorage.removeItem('stock_auth_token');
+      renderAuthHeader(null);
+      alert("已安全退出！");
+      loadData();
+    }
+
+    // ==================== APP 扫码下载弹窗 ====================
+    function openDownloadModal() {
+      const modal = document.getElementById('modal-download');
+      if (modal) modal.classList.remove('hidden');
+      const box = document.getElementById('app-qrcode');
+      if (box && !qrcodeInstance) {
+        box.innerHTML = '';
+        const downloadUrl = window.location.origin + '/download';
+        try {
+          qrcodeInstance = new QRCode(box, {
+            text: downloadUrl,
+            width: 140,
+            height: 140,
+            colorDark : "#0f172a",
+            colorLight : "#ffffff",
+            correctLevel : QRCode.CorrectLevel.M
+          });
+        } catch (e) {
+          box.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(downloadUrl)}" alt="下载二维码" class="w-[140px] h-[140px] mx-auto">`;
+        }
+      }
+    }
+
+    function closeDownloadModal() {
+      const modal = document.getElementById('modal-download');
+      if (modal) modal.classList.add('hidden');
+    }
+
     async function loadData() {
       try {
-        const res = await fetch('/api/stocks');
+        const res = await fetchWithAuth('/api/stocks');
         const data = await res.json();
         const holdings = data.holdings || [];
         const watchlists = data.watchlists || [];
@@ -1207,7 +1630,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       `;
 
       try {
-        const res = await fetch(`/api/stock/analysis?code=${code}&symbol=${symbol}`);
+        const res = await fetchWithAuth(`/api/stock/analysis?code=${code}&symbol=${symbol}`);
         const data = await res.json();
         
         if (data.quote) {
@@ -1464,7 +1887,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       content.classList.add('hidden');
 
       try {
-        const res = await fetch('/api/ai/diagnose', {
+        const res = await fetchWithAuth('/api/ai/diagnose', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: currentSelectedCode, symbol: currentSelectedSymbol })
@@ -1491,7 +1914,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       content.innerHTML = '';
 
       try {
-        const res = await fetch('/api/ai/diagnose', {
+        const res = await fetchWithAuth('/api/ai/diagnose', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
@@ -1738,7 +2161,7 @@ HTML_CONTENT = """<!DOCTYPE html>
     }
 
     async function submitStockData(code, name, cost, shares, isHolding) {
-      await fetch('/api/stock/save', {
+      await fetchWithAuth('/api/stock/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, name, cost: parseFloat(cost) || 0, shares: parseInt(shares) || 0, is_holding: isHolding })
@@ -1767,7 +2190,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 
     async function deleteStock(code) {
       if (!confirm("确定移除该股票吗？")) return;
-      await fetch('/api/stock/delete', {
+      await fetchWithAuth('/api/stock/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code })
@@ -1803,7 +2226,9 @@ HTML_CONTENT = """<!DOCTYPE html>
       if (modal) modal.classList.add('hidden');
     }
 
-    loadData();
+    checkAuthStatus().then(() => {
+      loadData();
+    });
   </script>
 
   <!-- 新闻穿透全文沉浸式阅读弹窗 (Modal) -->
@@ -1837,12 +2262,213 @@ HTML_CONTENT = """<!DOCTYPE html>
     </div>
   </div>
 
+
+  <!-- ==================== 登录 / 注册 弹窗 (主推微信扫码) ==================== -->
+  <div id="modal-auth" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative">
+      <button onclick="closeAuthModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <!-- Tab 切换 -->
+      <div class="flex border-b border-slate-700 pb-3 mb-5 gap-6">
+        <button id="tab-auth-wechat" onclick="switchAuthTab('wechat')" class="text-sm font-bold text-emerald-400 border-b-2 border-emerald-500 pb-1 cursor-pointer flex items-center gap-1.5">
+          <i class="fa-brands fa-weixin text-base"></i> 微信扫码关注
+        </button>
+        <button id="tab-auth-account" onclick="switchAuthTab('account')" class="text-sm font-bold text-slate-400 hover:text-white pb-1 cursor-pointer flex items-center gap-1.5">
+          <i class="fa-solid fa-user-lock"></i> 账号密码
+        </button>
+      </div>
+
+      <!-- 微信扫码登录面板 -->
+      <div id="panel-auth-wechat" class="text-center space-y-3">
+        <div class="bg-white p-2.5 rounded-xl inline-block shadow-lg mx-auto">
+          <img src="/qrcode.jpg" onerror="this.src='https://open.weixin.qq.com/qr/code?username=gh_9a8894622c4f'" class="w-36 h-36 mx-auto rounded-lg" alt="微信公众号二维码">
+        </div>
+        <p class="text-xs text-slate-200 font-bold flex items-center justify-center gap-1">
+          <i class="fa-solid fa-camera text-emerald-400"></i> 微信扫码关注【小筹量化分析】
+        </p>
+        <div class="text-[11px] text-slate-400 bg-slate-800/80 rounded-lg p-2 border border-slate-700">
+          关注后在聊天框回复 <span class="text-emerald-400 font-bold px-1.5 py-0.5 bg-emerald-500/20 rounded border border-emerald-500/30">登录</span> 获得 6 位验证码
+        </div>
+
+        <div class="flex gap-2 pt-1">
+          <input type="text" id="wechat-verify-code" placeholder="输入 6 位验证码" maxlength="6" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-center tracking-widest text-emerald-400 font-bold focus:outline-none focus:border-emerald-500">
+          <button onclick="submitWeChatCodeLogin()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold transition shadow-md shadow-emerald-600/30">
+            进入系统
+          </button>
+        </div>
+        <div id="wechat-error-msg" class="text-xs text-rose-400 hidden"></div>
+      </div>
+
+      <!-- 账号密码面板 (备用) -->
+      <div id="panel-auth-account" class="space-y-4 text-left hidden">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">账号 / 手机号</label>
+          <input type="text" id="auth-username" placeholder="请输入手机号或账号" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+        </div>
+        <div id="auth-nickname-wrap" class="hidden">
+          <label class="block text-xs font-medium text-slate-300 mb-1">您的昵称 (选填)</label>
+          <input type="text" id="auth-nickname" placeholder="例如：操盘手小王" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">密码</label>
+          <input type="password" id="auth-password" placeholder="请输入密码 (至少4位)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+        </div>
+
+        <div id="auth-error-msg" class="text-xs text-rose-400 hidden"></div>
+
+        <button id="btn-submit-auth" onclick="submitAuth()" class="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm transition shadow-lg shadow-blue-600/30">
+          立即登录
+        </button>
+        <div class="text-[11px] text-slate-500 text-center flex justify-between">
+          <span onclick="toggleRegisterSubMode()" id="sub-mode-toggle" class="text-blue-400 hover:underline cursor-pointer">没有账号？点此注册</span>
+          <span>云端私有独立股票池</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 手机 APP 下载 & 扫码弹窗 ==================== -->
+  <div id="modal-download" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative text-center">
+      <button onclick="closeDownloadModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <div class="w-12 h-12 mx-auto mb-2 rounded-xl bg-gradient-to-tr from-emerald-500 to-blue-500 p-0.5 shadow-lg">
+        <div class="w-full h-full bg-slate-900 rounded-xl flex items-center justify-center">
+          <i class="fa-solid fa-mobile-screen-button text-2xl text-emerald-400"></i>
+        </div>
+      </div>
+      <h3 class="text-lg font-bold text-white mb-1">下载安卓手机客户端</h3>
+      <p class="text-xs text-slate-400 mb-4">全屏无边框 · 个人独立股票池 · 离线秒开</p>
+
+      <!-- 动态二维码区域 -->
+      <div class="bg-white p-3.5 rounded-xl inline-block shadow-md mb-4">
+        <div id="app-qrcode"></div>
+      </div>
+      <p class="text-xs text-slate-300 font-medium mb-4"><i class="fa-solid fa-qrcode text-emerald-400"></i> 手机微信或相机扫一扫，立即下载安装</p>
+
+      <div class="space-y-2">
+        <a href="/download/app.apk" class="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition shadow-md flex items-center justify-center gap-2">
+          <i class="fa-brands fa-android text-base"></i> 电脑直接下载 APK 安装包
+        </a>
+        <a href="/download" target="_blank" class="w-full py-2 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition block">
+          打开专属移动端下载网页 <i class="fa-solid fa-arrow-up-right-from-square"></i>
+        </a>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
 """
 
 # ----------------- 后端服务路由与分发 -----------------
+
+DOWNLOAD_HTML_CONTENT = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>A股 AI 量化投资决策系统 - 官方安卓客户端下载</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <style>
+    body { background-color: #0b1329; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .glass-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.2); }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-4 md:p-8">
+  <div class="max-w-md mx-auto w-full pt-6 pb-12">
+    <!-- 图标与标题 -->
+    <div class="text-center mb-8">
+      <div class="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-tr from-blue-600 to-emerald-400 p-0.5 shadow-xl shadow-blue-500/20">
+        <div class="w-full h-full bg-slate-900 rounded-2xl flex items-center justify-center">
+          <i class="fa-solid fa-chart-line text-4xl text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400"></i>
+        </div>
+      </div>
+      <h1 class="text-2xl font-bold tracking-tight text-white mb-1">A股 AI 量化决策系统</h1>
+      <p class="text-xs text-slate-400">官方原生 Android 客户端 · v2.1.0 稳定版</p>
+      
+      <div class="flex justify-center gap-2 mt-3 flex-wrap">
+        <span class="px-2.5 py-0.5 text-xs bg-blue-500/20 text-blue-300 rounded-full border border-blue-500/30">全端数据同步</span>
+        <span class="px-2.5 py-0.5 text-xs bg-emerald-500/20 text-emerald-300 rounded-full border border-emerald-500/30">独立私人股票池</span>
+        <span class="px-2.5 py-0.5 text-xs bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/30">AI 操盘内参</span>
+      </div>
+    </div>
+
+    <!-- 下载主卡片 -->
+    <div class="glass-card rounded-2xl p-6 shadow-2xl mb-6 text-center">
+      <div class="text-slate-300 text-sm mb-4">
+        随时随地查看自选与持仓，毫秒级多因子量化评分与买卖点指引
+      </div>
+
+      <!-- 下载按钮 -->
+      <a href="/download/app.apk" class="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-base shadow-lg shadow-blue-600/30 transition flex items-center justify-center gap-2 mb-3">
+        <i class="fa-brands fa-android text-xl"></i>
+        <span>立即下载安卓 APK 安装包</span>
+      </a>
+      <div class="text-[11px] text-slate-500 mb-6">安装包大小：约 5.8 MB · 适用 Android 7.0 及以上系统</div>
+
+      <!-- 电脑端扫码下载指引 -->
+      <div class="border-t border-slate-700/80 pt-5">
+        <p class="text-xs text-slate-400 mb-3"><i class="fa-solid fa-qrcode text-blue-400"></i> 用手机扫一扫，直接在手机上下载安装：</p>
+        <div id="qrcode-box" class="bg-white p-3 rounded-xl inline-block shadow-md"></div>
+      </div>
+    </div>
+
+    <!-- 安装指引 -->
+    <div class="glass-card rounded-2xl p-5 shadow-xl text-xs text-slate-400 space-y-2">
+      <div class="font-bold text-slate-200 text-sm mb-1 flex items-center gap-1.5">
+        <i class="fa-solid fa-circle-info text-amber-400"></i> 安卓手机快速安装小贴士：
+      </div>
+      <p>1. 点击上方按钮下载 <strong>.apk</strong> 安装包；</p>
+      <p>2. 若手机提示“未知来源应用”或“可能存在风险”，请点击<strong>【允许本次安装】</strong>或<strong>【继续安装】</strong>；</p>
+      <p>3. 安装完成后在手机桌面直接点击图标，登录或注册即可拥有专属独立股票池！</p>
+    </div>
+
+    <div class="text-center mt-6">
+      <a href="/" class="text-xs text-blue-400 hover:underline flex items-center justify-center gap-1">
+        <i class="fa-solid fa-arrow-left"></i> 返回电脑/网页端直接使用
+      </a>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      const qrEl = document.getElementById('qrcode-box');
+      if (qrEl) {
+        new QRCode(qrEl, {
+          text: window.location.href,
+          width: 140,
+          height: 140,
+          colorDark : "#0f172a",
+          colorLight : "#ffffff",
+          correctLevel : QRCode.CorrectLevel.M
+        });
+      }
+    });
+  </script>
+</body>
+</html>
+"""
+
+
 class PurePythonStockHandler(BaseHTTPRequestHandler):
+    def get_current_user(self):
+        auth_header = self.headers.get("Authorization", "")
+        token = ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+        if not token:
+            url_parsed = urllib.parse.urlparse(self.path)
+            query_params = urllib.parse.parse_qs(url_parsed.query)
+            token = _get(query_params.get("token", [""]), 0).strip()
+        return user_manager.get_user_by_token(token)
+
     def send_json(self, data_dict):
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1860,10 +2486,100 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(HTML_CONTENT.encode("utf-8"))
+
+        elif path in ["/qrcode.jpg", "/static/qrcode.jpg", "/wechat_qr.jpg"]:
+            qr_candidates = [
+                os.path.join(CURRENT_DIR, "qrcode_for_gh_9a8894622c4f_1280.jpg"),
+                os.path.join(CURRENT_DIR, "qrcode.jpg"),
+                os.path.join(CURRENT_DIR, "static", "qrcode.jpg")
+            ]
+            found_qr = None
+            for qp in qr_candidates:
+                if os.path.exists(qp):
+                    found_qr = qp
+                    break
+            if found_qr:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(os.path.getsize(found_qr)))
+                self.end_headers()
+                with open(found_qr, "rb") as f_qr:
+                    self.wfile.write(f_qr.read())
+            else:
+                # 302 重定向到微信官方 CDN 实时生成的高清二维码
+                self.send_response(302)
+                self.send_header("Location", "https://open.weixin.qq.com/qr/code?username=gh_9a8894622c4f")
+                self.end_headers()
+
+        elif path in ["/wechat", "/wechat/callback", "/api/wechat"]:
+            signature = _get(query_params.get("signature", [""]), 0)
+            timestamp = _get(query_params.get("timestamp", [""]), 0)
+            nonce = _get(query_params.get("nonce", [""]), 0)
+            echostr = _get(query_params.get("echostr", [""]), 0)
             
+            check_list = [WECHAT_TOKEN, timestamp, nonce]
+            check_list.sort()
+            sha1 = hashlib.sha1("".join(check_list).encode("utf-8")).hexdigest()
+            
+            if sha1 == signature:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(echostr.encode("utf-8"))
+            else:
+                self.send_response(403)
+                self.end_headers()
+                self.wfile.write(b"Invalid signature")
+
+        elif path in ["/download", "/app", "/download.html"]:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(DOWNLOAD_HTML_CONTENT.encode("utf-8"))
+
+        elif path in ["/download/app.apk", "/static/stock_app.apk"]:
+            apk_paths = [
+                os.path.join(CURRENT_DIR, "stock_app.apk"),
+                os.path.join(CURRENT_DIR, "app.apk"),
+                os.path.join(CURRENT_DIR, "downloads", "stock_app.apk")
+            ]
+            found_apk = None
+            for ap in apk_paths:
+                if os.path.exists(ap):
+                    found_apk = ap
+                    break
+            if found_apk:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/vnd.android.package-archive")
+                self.send_header("Content-Disposition", 'attachment; filename="stock_quant_app.apk"')
+                self.send_header("Content-Length", str(os.path.getsize(found_apk)))
+                self.end_headers()
+                with open(found_apk, "rb") as f_apk:
+                    self.wfile.write(f_apk.read())
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                notice_html = "<html><body style='font-family:sans-serif;padding:30px;background:#0f172a;color:#fff;'><h2>📱 APK 安装包生成与上传指引</h2><p>当前服务器根目录下尚未检测到 <code>stock_app.apk</code> 文件。</p><p>您可以使用免费的 <b>HBuilderX</b> 将您的网址一键云打包为 APK 后，放置在项目根目录下，即可随时供所有用户点击/扫码下载！</p><p><a href='/download' style='color:#38bdf8;'>返回下载页面</a></p></body></html>"
+                self.wfile.write(notice_html.encode("utf-8"))
+
+        elif path == "/api/auth/me":
+            user = self.get_current_user()
+            if user:
+                self.send_json({"status": "success", "user": user})
+            else:
+                self.send_json({"status": "unauthorized"})
+
         elif path == "/api/stocks":
-            holdings, watchlists = get_enriched_stocks()
-            self.send_json({"holdings": holdings, "watchlists": watchlists})
+            user = self.get_current_user()
+            if user:
+                user_stocks = user_manager.get_stocks(user["username"])
+                holdings, watchlists = get_enriched_stocks(user_stocks)
+                self.send_json({"holdings": holdings, "watchlists": watchlists, "user": user})
+            else:
+                guest_stocks = user_manager.get_stocks("admin")
+                holdings, watchlists = get_enriched_stocks(guest_stocks)
+                self.send_json({"holdings": holdings, "watchlists": watchlists, "is_guest": True})
 
         elif path == "/api/stock/analysis":
             code = _get(query_params.get("code", [""]), 0).strip()
@@ -1940,7 +2656,10 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
         path = url_parsed.path
         content_length = int(self.headers.get("Content-Length", 0))
         post_data = self.rfile.read(content_length)
-        body = json.loads(post_data.decode("utf-8")) if post_data else {}
+        try:
+            body = json.loads(post_data.decode("utf-8")) if post_data else {}
+        except Exception:
+            body = {}
 
         pf_file = get_portfolio_path()
         stocks = []
@@ -1951,7 +2670,94 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        if path == "/api/stock/save":
+        if path in ["/wechat", "/wechat/callback", "/api/wechat"]:
+            try:
+                import xml.etree.ElementTree as ET
+                xml_root = ET.fromstring(post_data.decode("utf-8"))
+                to_user = xml_root.findtext("ToUserName", "")
+                from_user = xml_root.findtext("FromUserName", "")
+                msg_type = xml_root.findtext("MsgType", "")
+                content = xml_root.findtext("Content", "").strip() if msg_type == "text" else ""
+                event = xml_root.findtext("Event", "").strip() if msg_type == "event" else ""
+                
+                code = str(random.randint(100000, 999999))
+                wechat_auth_codes[code] = {
+                    "openid": from_user,
+                    "expires": time.time() + 600,
+                    "created_at": time.time()
+                }
+                
+                if msg_type == "event" and event.lower() == "subscribe":
+                    reply_text = f"欢迎关注【小筹量化分析】！\n\n您的网页登录验证码是：\n👉【 {code} 】\n(10分钟内有效)\n\n请在电脑网页端输入此验证码，即可开启您的专属个人股票池与操盘内参！"
+                else:
+                    reply_text = f"【小筹量化分析】您的登录验证码是：\n\n👉【 {code} 】\n\n(10分钟内有效)\n请在电脑或手机网页端输入此验证码完成登录。"
+                
+                reply_xml = f"""<xml>
+<ToUserName><![CDATA[{from_user}]]></ToUserName>
+<FromUserName><![CDATA[{to_user}]]></FromUserName>
+<CreateTime>{int(time.time())}</CreateTime>
+<MsgType><![CDATA[text]]></MsgType>
+<Content><![CDATA[{reply_text}]]></Content>
+</xml>"""
+                self.send_response(200)
+                self.send_header("Content-Type", "application/xml; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(reply_xml.encode("utf-8"))
+            except Exception as e:
+                print("WeChat XML parse error:", e)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"success")
+
+        elif path == "/api/auth/wechat_code_login":
+            code = str(body.get("code", "")).strip()
+            record = wechat_auth_codes.get(code)
+            if not record:
+                self.send_json({"status": "error", "message": "验证码不存在，请确认在公众号【小筹量化分析】回复【登录】获取的 6 位数字！"})
+                return
+            if record["expires"] < time.time():
+                del wechat_auth_codes[code]
+                self.send_json({"status": "error", "message": "验证码已超时过期，请在公众号重新回复【登录】获取！"})
+                return
+                
+            openid = record["openid"]
+            username = f"wx_{openid[-8:]}" if len(openid) >= 8 else f"wx_{openid}"
+            nickname = f"微信操盘手_{code[-4:]}"
+            
+            res, err = user_manager.get_or_create_wechat_user(username, nickname, openid)
+            try:
+                del wechat_auth_codes[code]
+            except Exception:
+                pass
+            self.send_json({"status": "success", "token": res["token"], "user": res})
+
+        elif path == "/api/auth/register":
+            u = body.get("username", "")
+            p = body.get("password", "")
+            n = body.get("nickname", "")
+            res, err = user_manager.register(u, p, n)
+            if res:
+                self.send_json({"status": "success", "token": res["token"], "user": res})
+            else:
+                self.send_json({"status": "error", "message": err})
+
+        elif path == "/api/auth/login":
+            u = body.get("username", "")
+            p = body.get("password", "")
+            res, err = user_manager.login(u, p)
+            if res:
+                self.send_json({"status": "success", "token": res["token"], "user": res})
+            else:
+                self.send_json({"status": "error", "message": err})
+
+        elif path == "/api/auth/logout":
+            self.send_json({"status": "success"})
+
+        elif path == "/api/stock/save":
+            user = self.get_current_user()
+            target_username = user["username"] if user else "admin"
+            
             raw_c = body.get("code")
             raw_n = body.get("name")
             cost = float(body.get("cost", 0.0))
@@ -1962,33 +2768,22 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             final_code = real_code if re.match(r'^\d{6}$', real_code) else raw_c
             final_name = real_name or raw_n
             
-            updated = False
-            for p in stocks:
-                if p.get("代码") == final_code:
-                    p.update({"代码": final_code, "名称": final_name, "成本价": cost, "持仓股数": shares, "is_holding": is_holding})
-                    updated = True
-                    break
-            if not updated:
-                stocks.append({"代码": final_code, "名称": final_name, "成本价": cost, "持仓股数": shares, "is_holding": is_holding})
-                
-            for p_path in [os.path.join(MODULES_DIR, "my_portfolio.json"), os.path.join(CURRENT_DIR, "my_portfolio.json")]:
-                try:
-                    with open(p_path, "w", encoding="utf-8") as f:
-                        json.dump(stocks, f, ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
-            self.send_json({"status": "success", "total": len(stocks)})
+            stock_item = {
+                "代码": final_code,
+                "名称": final_name,
+                "成本价": cost,
+                "持仓股数": shares,
+                "is_holding": is_holding
+            }
+            user_manager.save_stock(target_username, stock_item)
+            self.send_json({"status": "success", "username": target_username})
 
         elif path == "/api/stock/delete":
+            user = self.get_current_user()
+            target_username = user["username"] if user else "admin"
             code = body.get("code")
-            stocks = [p for p in stocks if p.get("代码") != code]
-            for p_path in [os.path.join(MODULES_DIR, "my_portfolio.json"), os.path.join(CURRENT_DIR, "my_portfolio.json")]:
-                try:
-                    with open(p_path, "w", encoding="utf-8") as f:
-                        json.dump(stocks, f, ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
-            self.send_json({"status": "success"})
+            user_manager.delete_stock(target_username, code)
+            self.send_json({"status": "success", "username": target_username})
 
         elif path == "/api/ai/diagnose":
             target_code = body.get("code")
@@ -2017,21 +2812,17 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
                 prev_c = float(quote.get("prev_close", 0.0) or curr_p)
                 scores = compute_quant_scores(target_code, quote.get("name"), curr_p, prev_c, kline_data)
 
-                # 智能识别是否为实战持仓股并提取真实成本
-                pf_file = get_portfolio_path()
+                # 智能识别当前登录用户的实战持仓股并提取真实成本
+                user = self.get_current_user()
+                target_username = user["username"] if user else "admin"
+                user_stocks = user_manager.get_stocks(target_username)
                 holding_item = None
-                if os.path.exists(pf_file):
-                    try:
-                        with open(pf_file, "r", encoding="utf-8") as f:
-                            pf_list = json.load(f)
-                        for sp in pf_list:
-                            if str(sp.get("代码", "")).strip() == target_code:
-                                cost_val = float(sp.get("成本价", 0.0) or 0.0)
-                                if cost_val > 0:
-                                    holding_item = sp
-                                    break
-                    except Exception:
-                        pass
+                for sp in user_stocks:
+                    if str(sp.get("代码", "")).strip() == target_code:
+                        cost_val = float(sp.get("成本价", 0.0) or 0.0)
+                        if cost_val > 0 and sp.get("is_holding", True):
+                            holding_item = sp
+                            break
 
                 pct_today_str = f"{((curr_p - prev_c)/prev_c*100):+.2f}%" if prev_c else "0.00%"
                 plan = compute_trade_plan(curr_p, is_holding=bool(holding_item), cost=float(holding_item.get("成本价", 0.0)) if holding_item else 0.0)
@@ -2205,16 +2996,29 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-if __name__ == "__main__":
-    port = 8000
-    server_address = ("0.0.0.0", port)
-    httpd = HTTPServer(server_address, PurePythonStockHandler)
-    print("\n" + "="*60)
-    print("🚀 A股 AI 量化投资与全端决策系统 [模块全集成旗舰版] 启动成功！")
-    print(f"💻 电脑浏览器访问:  http://127.0.0.1:{port}")
-    print(f"📱 手机浏览器访问:  http://[电脑局域网IP]:{port}")
-    print("="*60 + "\n")
+from http.server import ThreadingHTTPServer
+
+def run_server_port(p):
     try:
-        httpd.serve_forever()
+        srv = ThreadingHTTPServer(("0.0.0.0", p), PurePythonStockHandler)
+        print(f"✅ 成功监听端口: {p}")
+        srv.serve_forever()
+    except Exception as e:
+        print(f"ℹ️ 端口 {p} 启动状态: {e}")
+
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("🚀 A股 AI 量化投资与全端决策系统 [微信公众号对接全端旗舰版] 启动中...")
+    print("💻 网页端访问:      http://150.109.157.135:8000 或 http://150.109.157.135")
+    print("📱 微信回调对接地址: http://150.109.157.135/wechat")
+    print("="*60 + "\n")
+
+    # 在后台线程监听 80 端口 (专供微信消息推送和直接访问)
+    t_80 = threading.Thread(target=run_server_port, args=(80,), daemon=True)
+    t_80.start()
+
+    # 主线程监听 8000 端口 (兼容原本的访问习惯)
+    try:
+        run_server_port(8000)
     except KeyboardInterrupt:
         print("\n🛑 服务已安全停止。")
