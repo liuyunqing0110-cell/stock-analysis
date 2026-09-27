@@ -758,9 +758,6 @@ class UserManager:
                 return {"username": username, "nickname": nickname, "token": token}, ""
 
 
-# ==================== 微信公众号扫码验证码缓存 ====================
-wechat_auth_codes = {}  # code -> { openid, expires, created_at }
-WECHAT_TOKEN = "stockquant2026"
 
 user_manager = UserManager()
 
@@ -1361,75 +1358,52 @@ HTML_CONTENT = """<!DOCTYPE html>
     }
 
     function switchAuthTab(mode) {
-      const tabWx = document.getElementById('tab-auth-wechat');
-      const tabAcc = document.getElementById('tab-auth-account');
-      const panelWx = document.getElementById('panel-auth-wechat');
-      const panelAcc = document.getElementById('panel-auth-account');
-      const errWx = document.getElementById('wechat-error-msg');
-      const errAcc = document.getElementById('auth-error-msg');
-      if (errWx) errWx.classList.add('hidden');
-      if (errAcc) errAcc.classList.add('hidden');
+      authModalMode = mode;
+      const tabLogin = document.getElementById('tab-auth-login');
+      const tabReg = document.getElementById('tab-auth-register');
+      const nickWrap = document.getElementById('auth-nickname-wrap');
+      const btn = document.getElementById('btn-submit-auth');
+      const errEl = document.getElementById('auth-error-msg');
+      if (errEl) errEl.classList.add('hidden');
 
-      if (mode === 'wechat') {
-        if (tabWx) tabWx.className = "text-sm font-bold text-emerald-400 border-b-2 border-emerald-500 pb-1 cursor-pointer flex items-center gap-1.5";
-        if (tabAcc) tabAcc.className = "text-sm font-bold text-slate-400 hover:text-white pb-1 cursor-pointer flex items-center gap-1.5";
-        if (panelWx) panelWx.classList.remove('hidden');
-        if (panelAcc) panelAcc.classList.add('hidden');
+      if (mode === 'login') {
+        if (tabLogin) tabLogin.className = "text-base font-bold text-blue-400 border-b-2 border-blue-500 pb-1 cursor-pointer";
+        if (tabReg) tabReg.className = "text-base font-bold text-slate-400 hover:text-white pb-1 cursor-pointer";
+        if (nickWrap) nickWrap.classList.add('hidden');
+        if (btn) btn.innerText = "立即登录";
       } else {
-        if (tabAcc) tabAcc.className = "text-sm font-bold text-blue-400 border-b-2 border-blue-500 pb-1 cursor-pointer flex items-center gap-1.5";
-        if (tabWx) tabWx.className = "text-sm font-bold text-slate-400 hover:text-white pb-1 cursor-pointer flex items-center gap-1.5";
-        if (panelAcc) panelAcc.classList.remove('hidden');
-        if (panelWx) panelWx.classList.add('hidden');
+        if (tabReg) tabReg.className = "text-base font-bold text-blue-400 border-b-2 border-blue-500 pb-1 cursor-pointer";
+        if (tabLogin) tabLogin.className = "text-base font-bold text-slate-400 hover:text-white pb-1 cursor-pointer";
+        if (nickWrap) nickWrap.classList.remove('hidden');
+        if (btn) btn.innerText = "立即注册开通我的股票池";
       }
     }
 
     
-    async function submitWeChatCodeLogin() {
-      const inp = document.getElementById('wechat-verify-code');
-      const errEl = document.getElementById('wechat-error-msg');
-      const code = inp ? inp.value.trim() : '';
-      if (!code || code.length !== 6) {
-        if (errEl) { errEl.innerText = "请输入完整的 6 位数字验证码"; errEl.classList.remove('hidden'); }
-        return;
-      }
-      if (errEl) errEl.classList.add('hidden');
-      try {
-        const res = await fetch('/api/auth/wechat_code_login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code })
-        });
-        const data = await res.json();
-        if (data.status === 'success' && data.token) {
-          currentAuthToken = data.token;
-          currentAuthUser = data.user;
-          localStorage.setItem('stock_auth_token', currentAuthToken);
-          renderAuthHeader(currentAuthUser);
-          closeAuthModal();
-          alert(`🎉 微信扫码验证成功！欢迎进入【${currentAuthUser.nickname || '您的专属空间'}】。`);
-          loadData();
-        } else {
-          if (errEl) { errEl.innerText = data.message || "验证码不存在或已超时"; errEl.classList.remove('hidden'); }
+    let siteQrInstance = null;
+    function toggleMobileScanBox() {
+      const box = document.getElementById('mobile-scan-box');
+      if (!box) return;
+      if (box.classList.contains('hidden')) {
+        box.classList.remove('hidden');
+        const qrEl = document.getElementById('site-qrcode');
+        if (qrEl && !siteQrInstance) {
+          qrEl.innerHTML = '';
+          try {
+            siteQrInstance = new QRCode(qrEl, {
+              text: window.location.origin,
+              width: 130,
+              height: 130,
+              colorDark: "#0f172a",
+              colorLight: "#ffffff",
+              correctLevel: QRCode.CorrectLevel.M
+            });
+          } catch(e) {
+            qrEl.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=130x130&data=${encodeURIComponent(window.location.origin)}" class="w-[130px] h-[130px] mx-auto">`;
+          }
         }
-      } catch (e) {
-        if (errEl) { errEl.innerText = "网络连线异常: " + e; errEl.classList.remove('hidden'); }
-      }
-    }
-
-    let isRegisterSubMode = false;
-    function toggleRegisterSubMode() {
-      isRegisterSubMode = !isRegisterSubMode;
-      const nickWrap = document.getElementById('auth-nickname-wrap');
-      const btn = document.getElementById('btn-submit-auth');
-      const toggleTxt = document.getElementById('sub-mode-toggle');
-      if (isRegisterSubMode) {
-        nickWrap.classList.remove('hidden');
-        btn.innerText = "立即注册新账号";
-        toggleTxt.innerText = "已有账号？返回登录";
       } else {
-        nickWrap.classList.add('hidden');
-        btn.innerText = "立即登录";
-        toggleTxt.innerText = "没有账号？点此注册";
+        box.classList.add('hidden');
       }
     }
 
@@ -1472,7 +1446,17 @@ HTML_CONTENT = """<!DOCTYPE html>
           alert(authModalMode === 'login' ? `欢迎回来，${currentAuthUser.nickname || currentAuthUser.username}！` : `注册成功！已为您建立专属个人股票池。`);
           loadData();
         } else {
-          if (errEl) { errEl.innerText = data.message || "请求失败，请稍后重试"; errEl.classList.remove('hidden'); }
+          if (errEl) {
+            let msg = data.message || "请求失败，请稍后重试";
+            if (msg.includes("账号不存在")) {
+              errEl.innerHTML = `${msg} <a href="javascript:void(0)" onclick="switchAuthTab('register')" class="text-blue-400 font-bold underline ml-1">点此直接一键注册</a>`;
+            } else if (msg.includes("已存在")) {
+              errEl.innerHTML = `${msg} <a href="javascript:void(0)" onclick="switchAuthTab('login')" class="text-blue-400 font-bold underline ml-1">点此直接登录</a>`;
+            } else {
+              errEl.innerText = msg;
+            }
+            errEl.classList.remove('hidden');
+          }
         }
       } catch (e) {
         if (errEl) { errEl.innerText = "网络连线异常: " + e; errEl.classList.remove('hidden'); }
@@ -2263,7 +2247,7 @@ HTML_CONTENT = """<!DOCTYPE html>
   </div>
 
 
-  <!-- ==================== 登录 / 注册 弹窗 (主推微信扫码) ==================== -->
+  <!-- ==================== 登录 / 注册 弹窗 ==================== -->
   <div id="modal-auth" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative">
       <button onclick="closeAuthModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">
@@ -2272,44 +2256,22 @@ HTML_CONTENT = """<!DOCTYPE html>
 
       <!-- Tab 切换 -->
       <div class="flex border-b border-slate-700 pb-3 mb-5 gap-6">
-        <button id="tab-auth-wechat" onclick="switchAuthTab('wechat')" class="text-sm font-bold text-emerald-400 border-b-2 border-emerald-500 pb-1 cursor-pointer flex items-center gap-1.5">
-          <i class="fa-brands fa-weixin text-base"></i> 微信扫码关注
+        <button id="tab-auth-login" onclick="switchAuthTab('login')" class="text-base font-bold text-blue-400 border-b-2 border-blue-500 pb-1 cursor-pointer">
+          账号登录
         </button>
-        <button id="tab-auth-account" onclick="switchAuthTab('account')" class="text-sm font-bold text-slate-400 hover:text-white pb-1 cursor-pointer flex items-center gap-1.5">
-          <i class="fa-solid fa-user-lock"></i> 账号密码
+        <button id="tab-auth-register" onclick="switchAuthTab('register')" class="text-base font-bold text-slate-400 hover:text-white pb-1 cursor-pointer">
+          新用户注册
         </button>
       </div>
 
-      <!-- 微信扫码登录面板 -->
-      <div id="panel-auth-wechat" class="text-center space-y-3">
-        <div class="bg-white p-2.5 rounded-xl inline-block shadow-lg mx-auto">
-          <img src="/qrcode.jpg" onerror="this.src='https://open.weixin.qq.com/qr/code?username=gh_9a8894622c4f'" class="w-36 h-36 mx-auto rounded-lg" alt="微信公众号二维码">
-        </div>
-        <p class="text-xs text-slate-200 font-bold flex items-center justify-center gap-1">
-          <i class="fa-solid fa-camera text-emerald-400"></i> 微信扫码关注【小筹量化分析】
-        </p>
-        <div class="text-[11px] text-slate-400 bg-slate-800/80 rounded-lg p-2 border border-slate-700">
-          关注后在聊天框回复 <span class="text-emerald-400 font-bold px-1.5 py-0.5 bg-emerald-500/20 rounded border border-emerald-500/30">登录</span> 获得 6 位验证码
-        </div>
-
-        <div class="flex gap-2 pt-1">
-          <input type="text" id="wechat-verify-code" placeholder="输入 6 位验证码" maxlength="6" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-center tracking-widest text-emerald-400 font-bold focus:outline-none focus:border-emerald-500">
-          <button onclick="submitWeChatCodeLogin()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold transition shadow-md shadow-emerald-600/30">
-            进入系统
-          </button>
-        </div>
-        <div id="wechat-error-msg" class="text-xs text-rose-400 hidden"></div>
-      </div>
-
-      <!-- 账号密码面板 (备用) -->
-      <div id="panel-auth-account" class="space-y-4 text-left hidden">
+      <div class="space-y-4 text-left">
         <div>
           <label class="block text-xs font-medium text-slate-300 mb-1">账号 / 手机号</label>
           <input type="text" id="auth-username" placeholder="请输入手机号或账号" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
         </div>
         <div id="auth-nickname-wrap" class="hidden">
           <label class="block text-xs font-medium text-slate-300 mb-1">您的昵称 (选填)</label>
-          <input type="text" id="auth-nickname" placeholder="例如：操盘手小王" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+          <input type="text" id="auth-nickname" placeholder="例如：操盘手小李" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-300 mb-1">密码</label>
@@ -2321,9 +2283,16 @@ HTML_CONTENT = """<!DOCTYPE html>
         <button id="btn-submit-auth" onclick="submitAuth()" class="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm transition shadow-lg shadow-blue-600/30">
           立即登录
         </button>
-        <div class="text-[11px] text-slate-500 text-center flex justify-between">
-          <span onclick="toggleRegisterSubMode()" id="sub-mode-toggle" class="text-blue-400 hover:underline cursor-pointer">没有账号？点此注册</span>
-          <span>云端私有独立股票池</span>
+
+        <!-- 手机扫码直达本站 -->
+        <div class="pt-3 border-t border-slate-800 text-center">
+          <button onclick="toggleMobileScanBox()" class="text-xs text-slate-400 hover:text-emerald-400 transition flex items-center justify-center gap-1.5 mx-auto">
+            <i class="fa-solid fa-qrcode text-emerald-400"></i> 发给朋友？显示手机扫码直达二维码
+          </button>
+          <div id="mobile-scan-box" class="mt-3 p-3 bg-white rounded-xl shadow-md inline-block hidden">
+            <div id="site-qrcode"></div>
+            <p class="text-[11px] text-slate-800 font-bold mt-1.5">手机微信扫码直达注册</p>
+          </div>
         </div>
       </div>
     </div>
@@ -2487,49 +2456,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(HTML_CONTENT.encode("utf-8"))
 
-        elif path in ["/qrcode.jpg", "/static/qrcode.jpg", "/wechat_qr.jpg"]:
-            qr_candidates = [
-                os.path.join(CURRENT_DIR, "qrcode_for_gh_9a8894622c4f_1280.jpg"),
-                os.path.join(CURRENT_DIR, "qrcode.jpg"),
-                os.path.join(CURRENT_DIR, "static", "qrcode.jpg")
-            ]
-            found_qr = None
-            for qp in qr_candidates:
-                if os.path.exists(qp):
-                    found_qr = qp
-                    break
-            if found_qr:
-                self.send_response(200)
-                self.send_header("Content-Type", "image/jpeg")
-                self.send_header("Content-Length", str(os.path.getsize(found_qr)))
-                self.end_headers()
-                with open(found_qr, "rb") as f_qr:
-                    self.wfile.write(f_qr.read())
-            else:
-                # 302 重定向到微信官方 CDN 实时生成的高清二维码
-                self.send_response(302)
-                self.send_header("Location", "https://open.weixin.qq.com/qr/code?username=gh_9a8894622c4f")
-                self.end_headers()
 
-        elif path in ["/wechat", "/wechat/callback", "/api/wechat"]:
-            signature = _get(query_params.get("signature", [""]), 0)
-            timestamp = _get(query_params.get("timestamp", [""]), 0)
-            nonce = _get(query_params.get("nonce", [""]), 0)
-            echostr = _get(query_params.get("echostr", [""]), 0)
-            
-            check_list = [WECHAT_TOKEN, timestamp, nonce]
-            check_list.sort()
-            sha1 = hashlib.sha1("".join(check_list).encode("utf-8")).hexdigest()
-            
-            if sha1 == signature:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(echostr.encode("utf-8"))
-            else:
-                self.send_response(403)
-                self.end_headers()
-                self.wfile.write(b"Invalid signature")
 
         elif path in ["/download", "/app", "/download.html"]:
             self.send_response(200)
@@ -2670,69 +2597,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        if path in ["/wechat", "/wechat/callback", "/api/wechat"]:
-            try:
-                import xml.etree.ElementTree as ET
-                xml_root = ET.fromstring(post_data.decode("utf-8"))
-                to_user = xml_root.findtext("ToUserName", "")
-                from_user = xml_root.findtext("FromUserName", "")
-                msg_type = xml_root.findtext("MsgType", "")
-                content = xml_root.findtext("Content", "").strip() if msg_type == "text" else ""
-                event = xml_root.findtext("Event", "").strip() if msg_type == "event" else ""
-                
-                code = str(random.randint(100000, 999999))
-                wechat_auth_codes[code] = {
-                    "openid": from_user,
-                    "expires": time.time() + 600,
-                    "created_at": time.time()
-                }
-                
-                if msg_type == "event" and event.lower() == "subscribe":
-                    reply_text = f"欢迎关注【小筹量化分析】！\n\n您的网页登录验证码是：\n👉【 {code} 】\n(10分钟内有效)\n\n请在电脑网页端输入此验证码，即可开启您的专属个人股票池与操盘内参！"
-                else:
-                    reply_text = f"【小筹量化分析】您的登录验证码是：\n\n👉【 {code} 】\n\n(10分钟内有效)\n请在电脑或手机网页端输入此验证码完成登录。"
-                
-                reply_xml = f"""<xml>
-<ToUserName><![CDATA[{from_user}]]></ToUserName>
-<FromUserName><![CDATA[{to_user}]]></FromUserName>
-<CreateTime>{int(time.time())}</CreateTime>
-<MsgType><![CDATA[text]]></MsgType>
-<Content><![CDATA[{reply_text}]]></Content>
-</xml>"""
-                self.send_response(200)
-                self.send_header("Content-Type", "application/xml; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(reply_xml.encode("utf-8"))
-            except Exception as e:
-                print("WeChat XML parse error:", e)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                self.wfile.write(b"success")
-
-        elif path == "/api/auth/wechat_code_login":
-            code = str(body.get("code", "")).strip()
-            record = wechat_auth_codes.get(code)
-            if not record:
-                self.send_json({"status": "error", "message": "验证码不存在，请确认在公众号【小筹量化分析】回复【登录】获取的 6 位数字！"})
-                return
-            if record["expires"] < time.time():
-                del wechat_auth_codes[code]
-                self.send_json({"status": "error", "message": "验证码已超时过期，请在公众号重新回复【登录】获取！"})
-                return
-                
-            openid = record["openid"]
-            username = f"wx_{openid[-8:]}" if len(openid) >= 8 else f"wx_{openid}"
-            nickname = f"微信操盘手_{code[-4:]}"
-            
-            res, err = user_manager.get_or_create_wechat_user(username, nickname, openid)
-            try:
-                del wechat_auth_codes[code]
-            except Exception:
-                pass
-            self.send_json({"status": "success", "token": res["token"], "user": res})
-
-        elif path == "/api/auth/register":
+        if path == "/api/auth/register":
             u = body.get("username", "")
             p = body.get("password", "")
             n = body.get("nickname", "")
