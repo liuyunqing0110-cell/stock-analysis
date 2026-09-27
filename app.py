@@ -674,6 +674,46 @@ HTML_CONTENT = """<!DOCTYPE html>
     .tab-active { border-bottom: 2px solid #3b82f6; color: #60a5fa; font-weight: bold; }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+  
+    /* ================= 移动端与桌面端自适应金融终端排版 ================= */
+    .prose blockquote, .markdown-body blockquote {
+      border-left: 4px solid #f59e0b;
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.95));
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin: 8px 0;
+      color: #f1f5f9;
+      font-size: 13px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    }
+    .prose table, .markdown-body table { 
+      width: 100%; 
+      border-collapse: collapse; 
+      margin: 12px 0 16px 0; 
+      font-size: 12px;
+      display: table;
+      overflow-x: auto;
+    }
+    .prose th, .markdown-body th { 
+      background-color: #1e293b; 
+      color: #38bdf8; 
+      font-weight: 700; 
+      padding: 8px 10px; 
+      border: 1px solid #334155; 
+      text-align: left; 
+      white-space: nowrap;
+    }
+    .prose td, .markdown-body td { 
+      padding: 8px 10px; 
+      border: 1px solid #334155; 
+      color: #cbd5e1; 
+      line-height: 1.5;
+    }
+    .prose tr:nth-child(even), .markdown-body tr:nth-child(even) { background-color: rgba(15, 23, 42, 0.45); }
+    .prose tr:hover, .markdown-body tr:hover { background-color: rgba(51, 65, 85, 0.4); }
+    .prose strong, .markdown-body strong { color: #f8fafc; font-weight: 700; }
+    .prose h3, .markdown-body h3 { font-size: 14px; font-weight: 800; color: #f59e0b; margin-top: 16px; margin-bottom: 8px; border-bottom: 1px solid rgba(51,65,85,0.6); padding-bottom: 4px; }
+
   </style>
 </head>
 <body class="p-4 md:p-8 max-w-7xl mx-auto">
@@ -975,6 +1015,15 @@ HTML_CONTENT = """<!DOCTYPE html>
   </div>
 
   <script>
+    
+    // 渲染 Markdown 报告，自动规避波浪号 ~ 触发 Markdown 意外删除线 (strikethrough)
+    function renderSafeMarkdown(rawText) {
+      if (!rawText) return '无分析内容';
+      // 将英文半角波浪号 ~ 替换为中文全角 ～，彻底杜绝删除线误触发
+      const safeText = String(rawText).replace(/~/g, '～');
+      return marked.parse(safeText);
+    }
+
     let currentSelectedCode = null;
     let currentSelectedSymbol = null;
     let klineChartInstance = null;
@@ -1379,7 +1428,7 @@ HTML_CONTENT = """<!DOCTYPE html>
           body: JSON.stringify({ code: currentSelectedCode, symbol: currentSelectedSymbol })
         });
         const data = await res.json();
-        content.innerHTML = marked.parse(data.report || '无分析内容');
+        content.innerHTML = renderSafeMarkdown(data.report);
       } catch (e) {
         content.innerHTML = `<span class="text-rose-500">诊断失败: ${e}</span>`;
       } finally {
@@ -1406,7 +1455,7 @@ HTML_CONTENT = """<!DOCTYPE html>
           body: JSON.stringify({})
         });
         const data = await res.json();
-        content.innerHTML = marked.parse(data.report || '无分析内容');
+        content.innerHTML = renderSafeMarkdown(data.report);
       } catch (e) {
         content.innerHTML = `<span class="text-rose-500">诊断失败: ${e}</span>`;
       } finally {
@@ -1601,7 +1650,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       try {
         const res = await fetch('/api/hotspots/ai_review');
         const data = await res.json();
-        content.innerHTML = marked.parse(data.review || '暂无分析报告');
+        content.innerHTML = renderSafeMarkdown(data.review);
       } catch (e) {
         content.innerHTML = `<span class="text-rose-400">调用失败: ${e.message}</span>`;
       } finally {
@@ -1941,7 +1990,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 
                     profit_status = f"盈利 +{loss_pct:.2f}% (+{total_loss:.2f} 元)" if loss_pct > 0 else (f"持平 0.00%" if loss_pct == 0 else f"浮亏 {loss_pct:.2f}% ({total_loss:.2f} 元，直接回本需涨幅 +{needed_gain:.2f}%)")
 
-                    prompt = f"""你是一名资深 A 股私募基金投资总监。请针对用户【已购入的实战持仓标的】，结合其真实买入成本、当前盈亏及量化多因子评分，输出一份【全周期操盘手实战指导报告】：
+                    prompt = f"""你是一名资深 A 股私募基金投资总监。请针对用户【已购入的实战持仓标的】，输出一份【顶置核心决策牌 + 4张结构化表格】的实战操盘指引。
 
 【持仓账户与盘口数据】：
 - 股票标的：{quote.get('name')} ({target_code})
@@ -1949,55 +1998,94 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 - 当前最新现价：{curr_p:.2f} 元 (今日涨跌: {pct_today_str})
 - 您的持仓股数：{shares} 股
 - 当前持仓状态：{profit_status}
-- 量化多因子指标：MA5={scores.get('ma5')} | MA20={scores.get('ma20')} | MA60={scores.get('ma60')} | RSI(14)={scores.get('rsi')}
+- 量化多因子：MA5={scores.get('ma5')} | MA20={scores.get('ma20')} | MA60={scores.get('ma60')} | RSI(14)={scores.get('rsi')}
 - 三大周期量化评分：短线T+1={scores.get('short_term', {}).get('score')}分 ({scores.get('short_term', {}).get('desc')}) | 中线波段={scores.get('mid_term', {}).get('score')}分 ({scores.get('mid_term', {}).get('desc')}) | 长线配置={scores.get('long_term', {}).get('score')}分 ({scores.get('long_term', {}).get('desc')})
-- 系统量化点位：日内做T买点【{plan.get('t_buy')}元】 | 冲高做T卖点【{plan.get('t_sell')}元】 | 刚性止损底线【{plan.get('hard_stop')}元】
+- 关键点位：日内做T买点【{plan.get('t_buy')}元】 | 做T冲高卖点【{plan.get('t_sell')}元】 | 刚性止损红线【{plan.get('hard_stop')}元】
 
-【硬性表达要求】：
-1. 用户已明确持有该股票！严禁任何“建议初次建仓买入”、“轻仓试水”等针对未持仓者的套话！
-2. 语言干练犀利、一针见血，拒绝客套寒暄，直奔主题，严格按照以下四大板块输出，针对【短线、中线、长线】给出极其具体的点位与操作策略：
+【硬性排版要求 - 严格执行“样式一”手机/电脑全端适配】：
+1. 严禁任何口水话和客套寒暄，直击要害！
+2. **第一步（必须在最顶部输出三个醒目决策牌）**，采用 Markdown 引用块（> ）格式：
+> 🚦 **今日核心战术定调**：【根据盈亏和均线给出6~10字明确指令，如：日内做T降本 / 逢高反弹减仓 / 顺势持股待涨】 (说明当前筹码状态与防守底线)
+> 🟢 **日内做 T 回踩买点**：【 **{plan.get('t_buy')} 元** 】 (具体买入触发条件，预期降低每股成本幅度)
+> 🔴 **冲高做 T 止盈卖点**：【 **{plan.get('t_sell')} 元** 】 (具体卖出触发条件，遇关键阻力位果断落袋)
 
-### 一、 盘口健康度与持仓筹码结构定性
-- 结合当前成本价与现价，分析筹码处于获利盘锁定还是套牢抛压区；给出上方最近密集阻力位、下方核心防守支撑位。
+3. **第二步：紧接着输出以下四大紧凑表格（每张表控制在 2~3 列，极度适应手机竖屏单手阅读）**：
 
-### 二、 三大持有周期实战定调与具体操作
-结合量化得分（短线/中线/长线），明确给出三个不同持有周期的差异化操作指引：
-1. **⚡ 短线 T+1 操盘策略**：若用户偏好超短线，结合日内量比与分时波动，次日冲高是否应该落袋？日内做 T 低吸（回踩买入价）与高抛（冲高卖出价）的具体点位及预期差价收益。
-2. **🌊 中线波段操盘策略**：若用户做中线波段，结合 MA20/MA60 均线通道与动量趋势，当前处于波段持股期、反弹减仓期还是加仓窗口？给出波段持仓的底仓比例与移动止盈位。
-3. **💎 长线价值配置策略**：若用户做长线中军，结合当前估值分位、PB 安全边际与基本面底色，该股是否具备穿越牛熊的长期底仓防御价值？在何种支撑位适合逢低金字塔式补仓？
+### 一、 筹码分布与关键阻力支撑表
+| 诊断维度 | 核心点位 / 数据 | 操盘手定性结论与实战含义 |
+| :--- | :--- | :--- |
+| 成本与现价 | 成本 {cost:.2f}元 vs 现价 {curr_p:.2f}元 | 当前盈亏 {profit_status}，分析筹码处于获利盘还是套牢区 |
+| 上方关键阻力带 | 具体价格区间 (如 MA20/MA60) | 反弹抛压重灾区与做T交筹码窗口 |
+| 下方核心支撑带 | 具体价格区间 (如 做T买点/止损) | 多头最后防守位，跌破则趋势恶化 |
 
-### 三、 账户当前盈亏针对性应对策略
-- 若当前处于【盈利】：如何设置移动止盈保护垫，让利润奔跑的同时锁住既得胜利果实；
-- 若当前处于【微利/平盘】：多空方向选择在即，关键防守点位与减仓信号在何处；
-- 若当前处于【浮亏被套】：如何利用日内做 T 压低综合持仓成本，反弹至哪个关键技术压力位必须果断减亏降仓，绝不盲目死扛。
+### 二、 三大持有周期实战操作决策表（短/中/长线）
+| 周期类型与评分 | 核心点位规划 | 具体仓位动作与目标 |
+| :--- | :--- | :--- |
+| **⚡ 短线 T+1 ({scores.get('short_term', {}).get('score')}分)** | 做T买入: **{plan.get('t_buy')}元**<br>冲高卖出: **{plan.get('t_sell')}元** | 回踩低吸加仓，冲高必须T出底仓，预期赚差价，破止损严决减仓 |
+| **🌊 中线波段 ({scores.get('mid_term', {}).get('score')}分)** | 建议止盈: **xx元**<br>加仓均线: **xx元** | 保持合理底仓，未站稳MA20不盲目重仓，反弹分批减仓策略 |
+| **💎 长线价值 ({scores.get('long_term', {}).get('score')}分)** | 补仓点位:<br>一档: **xx元**<br>二档: **xx元** | 结合估值安全边际，评估长线回本目标价与金字塔分批布局计划 |
 
-### 四、 涨乐财富通条件单设置清单（供直接照抄）
-以清晰的 Markdown 表格输出不同操作偏好的自动化条件单：
-| 操盘偏好 | 条件单类型 | 触发价格 | 委托操作与数量 | 战术目的 |
+### 三、 账户当前实际盈亏针对性应对路线表
+| 战术步骤 | 触发价格条件 | 委托动作与仓位 | 战术目的与降本目标 |
+| :--- | :--- | :--- | :--- |
+| **步骤 1：日内做T降本** | 回踩至 **{plan.get('t_buy')}元** / 冲高至 **{plan.get('t_sell')}元** | 买入/卖出对应数量 | 测算每笔做T降低综合成本幅度 |
+| **步骤 2：阻力位减仓** | 达到上方第一技术阻力位 | 分批减仓比例 | 锁定反弹战果，防止回踩再度被套 |
+| **步骤 3：刚性风险防守** | 跌破 **{plan.get('hard_stop')}元** | 严格执行止损 | 绝不盲目死扛，守住本金底线 |
+
+### 四、 涨乐财富通条件单直接照抄清单
+| 条件单类型 | 监控触发价格 | 委托操作与数量 | 监控有效期 | 战术目的 |
+| :--- | :--- | :--- | :--- | :--- |
+| 股价回落买入 (做T低吸) | 价格 <= **{plan.get('t_buy')}元** | 限价买入 xx股 | 当日有效 | 日内回踩低吸拉低成本 |
+| 股价反弹卖出 (做T冲高) | 价格 >= **{plan.get('t_sell')}元** | 限价卖出 xx股 | 当日有效 | 冲高获利兑现做T差价 |
+| 止损条件单 (防守底线) | 价格 <= **{plan.get('hard_stop')}元** | 市价/限价卖出全部 | 长期有效 | 破位刚性离场规避深套 |
 """
                 else:
                     # 【场景 B：观察自选 / 市场热点推荐标的】—— 启动左侧狙击与建仓计划
                     plan = compute_trade_plan(curr_p, is_holding=False, cost=0.0)
-                    prompt = f"""你是一名专业私募基金投资总监。请针对以下用户【尚未持仓的观察标的】，输出一份【极度精炼、纯干货、零废话】的操盘手实战狙击建仓策略：
+                    prompt = f"""你是一名专业私募基金投资总监。请针对以下用户【尚未持仓的观察标的】，输出一份【顶置核心决策牌 + 4张结构化表格】的实战操盘策略。
 
 【标的技术面实时数据】：
 - 股票标的：{quote.get('name')} ({target_code})
 - 当前最新价格：{curr_p:.2f} 元 (今日涨跌: {pct_today_str})
 - 技术面指标：MA5={scores.get('ma5')} | MA20={scores.get('ma20')} | MA60={scores.get('ma60')} | RSI(14)={scores.get('rsi')}
-- 多因子评分：短线T+1={scores.get('short_term', {}).get('score')}分 ({scores.get('short_term', {}).get('desc')}) | 中线波段={scores.get('mid_term', {}).get('score')}分 | 长线价值={scores.get('long_term', {}).get('score')}分 | 评级={scores.get('overall_grade')}
+- 多因子评分：短线T+1={scores.get('short_term', {}).get('score')}分 ({scores.get('short_term', {}).get('desc')}) | 中线波段={scores.get('mid_term', {}).get('score')}分 ({scores.get('mid_term', {}).get('desc')}) | 长线价值={scores.get('long_term', {}).get('score')}分 ({scores.get('long_term', {}).get('desc')}) | 评级={scores.get('overall_grade')}
 - 计划点位：建议回踩买入区间【{plan.get('buy_range')}】 | 短线目标【{plan.get('target1')}元】 | 波段目标【{plan.get('target2')}元】 | 刚性止损【{plan.get('stop_loss')}元】
 
-【硬性要求】：
-1. 用户尚未持有该股票！重点在于评估开仓盈亏比与时机选择。
-2. 拒绝任何客套，严格按如下4部分输出：
-### 一、 盘口形态与资金意图量化研判
-- 均线多空结构、主力资金进出信号、超买超卖评估。
-### 二、 估值安全边际与向上赔率测算
-- 当前价格位置的下行风险与向上弹性空间，盈亏比是否达到 3:1 以上。
-### 三、 实战操盘战术定调
-- 短线 T+1 进出场条件、中线波段加仓时机、长线价值配置仓位。
-### 四、 涨乐财富通实战挂单计划
-- 具体的挂单买入区间、分批止盈目标价、跌破何价位果断止损离场。
+【硬性排版要求 - 严格执行“样式一”全端适配】：
+1. **第一步（在最顶部输出三个醒目决策牌）**，采用 Markdown 引用块（> ）格式：
+> 🚦 **核心战术定调**：【根据技术面给出6~10字建仓建议，如：回踩下沿埋伏 / 右侧放量突破上车 / 观望等待信号】 (盈亏比结论与仓位配比)
+> 🟢 **建议回踩建仓区间**：【 **{plan.get('buy_range')} 元** 】 (严格限价挂单，严禁追高)
+> 🔴 **短线第一止盈目标**：【 **{plan.get('target1')} 元 (+4.5%)** 】 (冲高触及果断减半锁定利润)
+
+2. **第二步：紧接着输出以下四大紧凑表格（每张表控制在 2~3 列，手机竖屏单手阅读极佳）**：
+
+### 一、 盘口形态与技术指标量化表
+| 分析维度 | 当前技术状态 | 主力资金意图与技术含义 |
+| :--- | :--- | :--- |
+| 均线多空结构 | MA5/20/60 排列形态 | 趋势方向与均线支撑阻力 |
+| 量价与动量 | RSI(14) 及成交量状态 | 超买超卖评估与资金吸筹意图 |
+| 综合评级 | {scores.get('overall_grade')} | 明确是否具备入场赔率 |
+
+### 二、 估值安全边际与向上赔率测算表
+| 估值与空间 | 点位规划 | 收益与风险评估结论 |
+| :--- | :--- | :--- |
+| 上行目标位 | 第一目标 **{plan.get('target1')}元** (+4.5%)<br>第二目标 **{plan.get('target2')}元** (+10%) | 测算向上弹性空间 |
+| 下行防守线 | 开仓止损 **{plan.get('stop_loss')}元** (-2.0%) | 潜在最大试错风险与盈亏比结论 |
+
+### 三、 三大周期操盘战术定调表
+| 周期类型与评分 | 建议仓位 | 进场与出场战术指令 |
+| :--- | :--- | :--- |
+| **⚡ 短线 T+1 ({scores.get('short_term', {}).get('score')}分)** | 2成机动仓 | 回踩买入区间低吸挂单，次日冲高落袋止盈 |
+| **🌊 中线波段 ({scores.get('mid_term', {}).get('score')}分)** | 3~4成仓位 | 顺应均线趋势持股，跌破关键防守位离场 |
+| **💎 长线价值 ({scores.get('long_term', {}).get('score')}分)** | 观望 / 底仓配置 | 结合估值安全边际，执行金字塔逢低分批建仓 |
+
+### 四、 涨乐财富通实战挂单计划表
+| 条件单类型 | 监控触发价格 | 委托数量 | 有效期 | 操盘目的 |
+| :--- | :--- | :--- | :--- | :--- |
+| 限价买入条件单 | 价格 <= **{plan.get('buy_range')}** | 计划底仓数量 | 当日有效 | 严格左侧低吸，防追高 |
+| 止盈条件单 (短线) | 价格 >= **{plan.get('target1')}元** | 卖出 1/2 仓位 | 长期有效 | 锁定第一波短线利润 |
+| 止盈条件单 (波段) | 价格 >= **{plan.get('target2')}元** | 卖出剩余仓位 | 长期有效 | 把握中线波段主升浪 |
+| 止损条件单 (刚性) | 价格 <= **{plan.get('stop_loss')}元** | 全部清仓离场 | 长期有效 | 刚性截断亏损，规避深套 |
 """
             else:
                 holdings, watchlists = get_enriched_stocks()
