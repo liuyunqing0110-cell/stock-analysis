@@ -675,44 +675,64 @@ HTML_CONTENT = """<!DOCTYPE html>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
   
-    /* ================= 移动端与桌面端自适应金融终端排版 ================= */
-    .prose blockquote, .markdown-body blockquote {
-      border-left: 4px solid #f59e0b;
-      background: linear-gradient(135deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.95));
-      border-radius: 8px;
-      padding: 10px 14px;
-      margin: 8px 0;
-      color: #f1f5f9;
-      font-size: 13px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    
+    /* ================= 顶级金融终端高清晰度表格与决策牌排版 ================= */
+    #single-ai-content table, #all-ai-content table, .markdown-body table { 
+      width: 100% !important; 
+      border-collapse: collapse !important; 
+      margin: 14px 0 22px 0 !important; 
+      border: 1px solid #334155 !important;
+      background-color: #0f172a !important;
+      border-radius: 8px !important;
+      overflow: hidden !important;
+      display: table !important;
     }
-    .prose table, .markdown-body table { 
-      width: 100%; 
-      border-collapse: collapse; 
-      margin: 12px 0 16px 0; 
-      font-size: 12px;
-      display: table;
-      overflow-x: auto;
+    #single-ai-content th, #all-ai-content th, .markdown-body th { 
+      background-color: #1e293b !important; 
+      color: #38bdf8 !important; 
+      font-weight: 700 !important; 
+      padding: 10px 14px !important; 
+      border: 1px solid #334155 !important; 
+      text-align: left !important; 
+      font-size: 13px !important;
+      white-space: nowrap !important;
     }
-    .prose th, .markdown-body th { 
-      background-color: #1e293b; 
-      color: #38bdf8; 
-      font-weight: 700; 
-      padding: 8px 10px; 
-      border: 1px solid #334155; 
-      text-align: left; 
-      white-space: nowrap;
+    #single-ai-content td, #all-ai-content td, .markdown-body td { 
+      padding: 10px 14px !important; 
+      border: 1px solid #334155 !important; 
+      color: #e2e8f0 !important; 
+      font-size: 12.5px !important;
+      line-height: 1.6 !important;
+      vertical-align: middle !important;
     }
-    .prose td, .markdown-body td { 
-      padding: 8px 10px; 
-      border: 1px solid #334155; 
-      color: #cbd5e1; 
-      line-height: 1.5;
+    #single-ai-content tr:nth-child(even), #all-ai-content tr:nth-child(even), .markdown-body tr:nth-child(even) { 
+      background-color: rgba(30, 41, 59, 0.45) !important; 
     }
-    .prose tr:nth-child(even), .markdown-body tr:nth-child(even) { background-color: rgba(15, 23, 42, 0.45); }
-    .prose tr:hover, .markdown-body tr:hover { background-color: rgba(51, 65, 85, 0.4); }
-    .prose strong, .markdown-body strong { color: #f8fafc; font-weight: 700; }
-    .prose h3, .markdown-body h3 { font-size: 14px; font-weight: 800; color: #f59e0b; margin-top: 16px; margin-bottom: 8px; border-bottom: 1px solid rgba(51,65,85,0.6); padding-bottom: 4px; }
+    #single-ai-content tr:hover, #all-ai-content tr:hover, .markdown-body tr:hover { 
+      background-color: rgba(51, 65, 85, 0.4) !important; 
+    }
+    #single-ai-content blockquote, #all-ai-content blockquote, .markdown-body blockquote {
+      border-left: 4px solid #f59e0b !important;
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98)) !important;
+      border-radius: 8px !important;
+      padding: 12px 16px !important;
+      margin: 10px 0 !important;
+      color: #f8fafc !important;
+      font-size: 13.5px !important;
+      line-height: 1.6 !important;
+      border: 1px solid rgba(245, 158, 11, 0.35) !important;
+      border-left: 4px solid #f59e0b !important;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4) !important;
+    }
+    #single-ai-content h3, #all-ai-content h3, .markdown-body h3 {
+      font-size: 15px !important;
+      font-weight: 800 !important;
+      color: #f59e0b !important;
+      margin-top: 24px !important;
+      margin-bottom: 12px !important;
+      padding-left: 10px !important;
+      border-left: 4px solid #3b82f6 !important;
+    }
 
   </style>
 </head>
@@ -1019,8 +1039,16 @@ HTML_CONTENT = """<!DOCTYPE html>
     // 渲染 Markdown 报告，自动规避波浪号 ~ 触发 Markdown 意外删除线 (strikethrough)
     function renderSafeMarkdown(rawText) {
       if (!rawText) return '无分析内容';
-      // 将英文半角波浪号 ~ 替换为中文全角 ～，彻底杜绝删除线误触发
-      const safeText = String(rawText).replace(/~/g, '～');
+      let safeText = String(rawText);
+      const LF = String.fromCharCode(10);
+      // 1. 将英文半角波浪号 ~ 替换为中文全角 ～，彻底杜绝删除线误触发
+      safeText = safeText.replace(/~/g, '～');
+      // 2. 自动给独立引用块（> 决策牌）之间补空行，强制渲染为独立分离的大卡片
+      safeText = safeText.replace(new RegExp('(^>.*?)' + LF + '(>)', 'gm'), '$1' + LF + LF + '$2');
+      safeText = safeText.replace(new RegExp('(^>.*?)' + LF + '(>)', 'gm'), '$1' + LF + LF + '$2');
+      // 3. 自动在表格和标题前补空行，确保 Markdown 完美解析为原生 table 元素
+      safeText = safeText.replace(new RegExp('([^' + LF + '|])' + LF + '(\\|.*?\\|)', 'g'), '$1' + LF + LF + '$2');
+      safeText = safeText.replace(new RegExp('([^' + LF + '])' + LF + '(###\\s+)', 'g'), '$1' + LF + LF + '$2');
       return marked.parse(safeText);
     }
 
@@ -1990,7 +2018,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 
                     profit_status = f"盈利 +{loss_pct:.2f}% (+{total_loss:.2f} 元)" if loss_pct > 0 else (f"持平 0.00%" if loss_pct == 0 else f"浮亏 {loss_pct:.2f}% ({total_loss:.2f} 元，直接回本需涨幅 +{needed_gain:.2f}%)")
 
-                    prompt = f"""你是一名资深 A 股私募基金投资总监。请针对用户【已购入的实战持仓标的】，输出一份【顶置核心决策牌 + 4张结构化表格】的实战操盘指引。
+                    prompt = f"""你是一名资深 A 股私募基金投资总监。请针对用户【已购入的实战持仓标的】，输出一份【顶置三大核心决策牌 + 四大清晰结构化表格】的操盘手实战执单。
 
 【持仓账户与盘口数据】：
 - 股票标的：{quote.get('name')} ({target_code})
@@ -2002,14 +2030,16 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 - 三大周期量化评分：短线T+1={scores.get('short_term', {}).get('score')}分 ({scores.get('short_term', {}).get('desc')}) | 中线波段={scores.get('mid_term', {}).get('score')}分 ({scores.get('mid_term', {}).get('desc')}) | 长线配置={scores.get('long_term', {}).get('score')}分 ({scores.get('long_term', {}).get('desc')})
 - 关键点位：日内做T买点【{plan.get('t_buy')}元】 | 做T冲高卖点【{plan.get('t_sell')}元】 | 刚性止损红线【{plan.get('hard_stop')}元】
 
-【硬性排版要求 - 严格执行“样式一”手机/电脑全端适配】：
-1. 严禁任何口水话和客套寒暄，直击要害！
-2. **第一步（必须在最顶部输出三个醒目决策牌）**，采用 Markdown 引用块（> ）格式：
-> 🚦 **今日核心战术定调**：【根据盈亏和均线给出6~10字明确指令，如：日内做T降本 / 逢高反弹减仓 / 顺势持股待涨】 (说明当前筹码状态与防守底线)
-> 🟢 **日内做 T 回踩买点**：【 **{plan.get('t_buy')} 元** 】 (具体买入触发条件，预期降低每股成本幅度)
-> 🔴 **冲高做 T 止盈卖点**：【 **{plan.get('t_sell')} 元** 】 (具体卖出触发条件，遇关键阻力位果断落袋)
+【硬性排版要求 - 彻底告别大段文字，一目了然】：
+1. 严禁任何客套废话！
+2. **第一步（必须在最顶部输出三个独立决策牌，每张牌之间空一行）**：
+> 🚦 **今日核心战术定调**：【给出明确指令，如：日内做T降本 / 逢高反弹减仓 / 顺势持股待涨】 (说明当前筹码状态与防守底线)
 
-3. **第二步：紧接着输出以下四大紧凑表格（每张表控制在 2~3 列，极度适应手机竖屏单手阅读）**：
+> 🟢 **日内做 T 回踩买点**：【 **{plan.get('t_buy')} 元** 】 (具体买入触发条件，预期降低每股成本幅度)
+
+> 🔴 **冲高做 T 止盈卖点**：【 **{plan.get('t_sell')} 元** 】 (具体卖出触发条件，遇阻力位果断落袋)
+
+3. **第二步：紧接着输出以下四大紧凑表格（每张表必须包含标准表头和表格边框，每张表前后空一行）**：
 
 ### 一、 筹码分布与关键阻力支撑表
 | 诊断维度 | 核心点位 / 数据 | 操盘手定性结论与实战含义 |
@@ -2021,7 +2051,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
 ### 二、 三大持有周期实战操作决策表（短/中/长线）
 | 周期类型与评分 | 核心点位规划 | 具体仓位动作与目标 |
 | :--- | :--- | :--- |
-| **⚡ 短线 T+1 ({scores.get('short_term', {}).get('score')}分)** | 做T买入: **{plan.get('t_buy')}元**<br>冲高卖出: **{plan.get('t_sell')}元** | 回踩低吸加仓，冲高必须T出底仓，预期赚差价，破止损严决减仓 |
+| **⚡ 短线 T+1 ({scores.get('short_term', {}).get('score')}分)** | 做T买入: **{plan.get('t_buy')}元**<br>冲高卖出: **{plan.get('t_sell')}元** | 回踩低吸加仓，冲高必须T出底仓，赚差价降本，破止损严决减仓 |
 | **🌊 中线波段 ({scores.get('mid_term', {}).get('score')}分)** | 建议止盈: **xx元**<br>加仓均线: **xx元** | 保持合理底仓，未站稳MA20不盲目重仓，反弹分批减仓策略 |
 | **💎 长线价值 ({scores.get('long_term', {}).get('score')}分)** | 补仓点位:<br>一档: **xx元**<br>二档: **xx元** | 结合估值安全边际，评估长线回本目标价与金字塔分批布局计划 |
 
