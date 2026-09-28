@@ -831,25 +831,25 @@ def get_enriched_stocks(stocks=None):
             if is_holding and cost > 0:
                 profit_pct = round(((curr_price - cost) / cost) * 100, 2)
                 profit_amount = round((curr_price - cost) * (shares or 1000), 2)
-                t_buy = plan.get("t_buy", round(curr_price * 0.982, 2))
-                t_sell = plan.get("t_sell", round(curr_price * 1.032, 2))
-                hard_stop = plan.get("hard_stop", round(cost * 0.95 if curr_price >= cost else curr_price * 0.965, 2))
+                t_buy = float(plan.get("t_buy") or (curr_price * 0.982))
+                t_sell = float(plan.get("t_sell") or (curr_price * 1.032))
+                hard_stop = float(plan.get("hard_stop") or plan.get("atr_stop") or (cost * 0.95 if curr_price >= cost else curr_price * 0.965))
                 portfolio_list.append({
                     "code": code, "symbol": symbol, "name": name, "cost": cost, "price": curr_price,
                     "pct_today": pct_today, "shares": shares,
                     "profit_pct": profit_pct, "profit_amount": profit_amount,
-                    "t_buy": t_buy, "t_sell": t_sell, "hard_stop": hard_stop
+                    "t_buy": round(t_buy, 2), "t_sell": round(t_sell, 2), "hard_stop": round(hard_stop, 2)
                 })
             else:
-                entry_range = plan.get("buy_range") or plan.get("entry_range") or f"{curr_price*0.98:.2f} ~ {curr_price*0.99:.2f}"
-                target1 = plan.get("target1", round(curr_price * 1.045, 2))
-                target2 = plan.get("target2", round(curr_price * 1.100, 2))
-                stop_loss = plan.get("stop_loss", round(curr_price * 0.980, 2))
+                entry_range = str(plan.get("buy_range") or plan.get("entry_range") or f"{curr_price*0.98:.2f} ~ {curr_price*0.99:.2f}")
+                target1 = float(plan.get("target1") or plan.get("profit_price") or (curr_price * 1.045))
+                target2 = float(plan.get("target2") or (curr_price * 1.100))
+                stop_loss = float(plan.get("stop_loss") or plan.get("hard_stop") or plan.get("atr_stop") or (curr_price * 0.980))
                 watchlist_list.append({
                     "code": code, "symbol": symbol, "name": name, "price": curr_price,
                     "pct_today": pct_today,
                     "entry_range": entry_range,
-                    "target1": target1, "target2": target2, "stop_loss": stop_loss
+                    "target1": round(target1, 2), "target2": round(target2, 2), "stop_loss": round(stop_loss, 2)
                 })
         except Exception as item_err:
             print(f"Error enriching stock item {p}: {item_err}")
@@ -1267,47 +1267,68 @@ HTML_CONTENT = """<!DOCTYPE html>
       let safeText = String(rawText);
       const LF = String.fromCharCode(10);
       safeText = safeText.replace(/~/g, '～');
-      safeText = safeText.replace(new RegExp('(^>.*?)' + LF + '(>)', 'gm'), '$1' + LF + LF + '$2');
-      safeText = safeText.replace(new RegExp('([^' + LF + '|])' + LF + '(\\|.*?\\|)', 'g'), '$1' + LF + LF + '$2');
-      safeText = safeText.replace(new RegExp('([^' + LF + '])' + LF + '(###\\s+)', 'g'), '$1' + LF + LF + '$2');
       safeText = safeText.replace(/\*💡\s*(.*?)\*/g, '<div class="section-desc">💡 $1</div>');
 
-      // 智能分片：按 ### 一、二、三、四 切割为可切换的独立选项卡
-      const parts = safeText.split(/(###\s*[一二三四1234]、?[^\n]+)/);
-      if (parts.length < 3) {
+      const lines = safeText.split(LF);
+      let topLines = [];
+      let tabs = [];
+      let currentTab = null;
+
+      const tabTitles = [
+        { key: '一', title: '🏢 行业地位与估值', icon: 'fa-building-columns' },
+        { key: '二', title: '🧭 周期与盘口决策', icon: 'fa-chart-pie' },
+        { key: '三', title: '🎯 盈亏应对实操路线', icon: 'fa-route' },
+        { key: '四', title: '📋 券商条件单照抄', icon: 'fa-list-check' }
+      ];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        let matchedTab = null;
+        for (let t of tabTitles) {
+          if (trimmed.indexOf(t.key + '、') !== -1 || trimmed.indexOf(t.key + '.') !== -1) {
+            matchedTab = t;
+            break;
+          }
+        }
+
+        if (matchedTab && (trimmed.startsWith('#') || trimmed.startsWith('**') || trimmed.startsWith(matchedTab.key))) {
+          if (currentTab) {
+            tabs.push(currentTab);
+          }
+          currentTab = {
+            title: matchedTab.title,
+            icon: matchedTab.icon,
+            lines: [line]
+          };
+        } else {
+          if (currentTab) {
+            currentTab.lines.push(line);
+          } else {
+            topLines.push(line);
+          }
+        }
+      }
+
+      if (currentTab) {
+        tabs.push(currentTab);
+      }
+
+      if (tabs.length < 2) {
         return marked.parse(safeText);
       }
 
-      // 顶部常驻区域：股票标题与三大决策牌
-      const topContent = marked.parse(parts[0]);
-      let tabs = [];
-      const icons = ['fa-building-columns', 'fa-chart-pie', 'fa-route', 'fa-list-check'];
-
-      for (let i = 1; i < parts.length; i += 2) {
-        let fullTitle = parts[i].replace(/###\s*[一二三四1234]、?\s*/, '').trim();
-        let shortTitle = fullTitle;
-        if (fullTitle.includes('行业') || fullTitle.includes('估值') || fullTitle.includes('阻力') || fullTitle.includes('筹码')) {
-          shortTitle = '🏢 行业地位与估值';
-        } else if (fullTitle.includes('周期') || fullTitle.includes('盘口') || fullTitle.includes('形态')) {
-          shortTitle = '🧭 周期与盘口决策';
-        } else if (fullTitle.includes('路线') || fullTitle.includes('自救') || fullTitle.includes('盈亏')) {
-          shortTitle = '🎯 盈亏应对实操路线';
-        } else if (fullTitle.includes('条件单') || fullTitle.includes('挂单')) {
-          shortTitle = '📋 券商条件单照抄';
-        }
-
-        const bodyHtml = marked.parse(parts[i] + (parts[i+1] || ''));
-        tabs.push({ title: shortTitle, fullTitle: fullTitle, html: bodyHtml });
-      }
-
+      const topHtml = marked.parse(topLines.join(LF));
       const buttonsHtml = `
-        <div class="my-4 p-1.5 bg-slate-950/80 rounded-xl border border-slate-800 flex flex-wrap gap-2 items-center">
+        <div class="my-4 p-2 bg-slate-950/90 rounded-xl border border-blue-500/40 flex flex-wrap gap-2 items-center shadow-xl">
+          <span class="text-xs text-slate-400 font-semibold mr-1 flex items-center gap-1.5"><i class="fa-solid fa-layer-group text-blue-400"></i> 板块切换:</span>
           ${tabs.map((t, idx) => `
-            <button onclick="switchAiReportTab(${idx})" id="ai-tab-btn-${idx}" class="ai-tab-pill px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${idx === 0 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
-              <i class="fa-solid ${icons[idx] || 'fa-folder'}"></i> ${t.title}
+            <button onclick="switchAiReportTab(${idx})" id="ai-tab-btn-${idx}" class="ai-tab-pill px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${idx === 0 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 ring-1 ring-blue-400' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+              <i class="fa-solid ${t.icon}"></i> ${t.title}
             </button>
           `).join('')}
-          <button onclick="switchAiReportTab('ALL')" id="ai-tab-btn-ALL" class="ai-tab-pill px-3 py-2 rounded-lg text-xs font-medium bg-slate-800/60 text-slate-400 hover:text-white transition ml-auto">
+          <button onclick="switchAiReportTab('ALL')" id="ai-tab-btn-ALL" class="ai-tab-pill px-3.5 py-2 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-400 hover:text-white transition ml-auto border border-slate-700">
             <i class="fa-solid fa-bars"></i> 展开全部
           </button>
         </div>
@@ -1317,16 +1338,16 @@ HTML_CONTENT = """<!DOCTYPE html>
         <div id="ai-report-panels" class="mt-3">
           ${tabs.map((t, idx) => `
             <div id="ai-tab-panel-${idx}" class="ai-tab-panel ${idx === 0 ? '' : 'hidden'}">
-              ${t.html}
+              ${marked.parse(t.lines.join(LF))}
             </div>
           `).join('')}
           <div id="ai-tab-panel-ALL" class="ai-tab-panel hidden space-y-6">
-            ${tabs.map(t => t.html).join('')}
+            ${tabs.map(t => marked.parse(t.lines.join(LF))).join('')}
           </div>
         </div>
       `;
 
-      return topContent + buttonsHtml + panelsHtml;
+      return topHtml + buttonsHtml + panelsHtml;
     }
 
     window.switchAiReportTab = function(tabId) {
@@ -1337,7 +1358,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 
       const btn = document.getElementById('ai-tab-btn-' + tabId);
       const panel = document.getElementById('ai-tab-panel-' + tabId);
-      if (btn) btn.className = "ai-tab-pill px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 bg-blue-600 text-white shadow-lg shadow-blue-500/20";
+      if (btn) btn.className = "ai-tab-pill px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 bg-blue-600 text-white shadow-lg shadow-blue-500/30 ring-1 ring-blue-400";
       if (panel) panel.classList.remove('hidden');
     };
 
@@ -1651,16 +1672,16 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <td class="py-3 px-4 font-bold text-white">
                   ${item.name} <span class="text-xs font-normal text-slate-400">(${item.code})</span>
                 </td>
-                <td class="py-3 px-3">${item.cost.toFixed(2)} 元</td>
-                <td class="py-3 px-3 font-semibold ${item.pct_today >= 0 ? 'stock-up':'stock-down'}">${item.price.toFixed(2)} 元</td>
+                <td class="py-3 px-3">${fmt2(item.cost)} 元</td>
+                <td class="py-3 px-3 font-semibold ${item.pct_today >= 0 ? 'stock-up':'stock-down'}">${fmt2(item.price)} 元</td>
                 <td class="py-3 px-3">
                   <span class="px-2 py-0.5 rounded text-xs font-bold ${isUp ? 'badge-up':'badge-down'}">
                     ${item.profit_pct > 0 ? '+':''}${item.profit_pct}% (${item.profit_amount}元)
                   </span>
                 </td>
-                <td class="py-3 px-3 text-blue-400 font-medium">【 ${item.t_buy.toFixed(2)} 】</td>
-                <td class="py-3 px-3 text-amber-400 font-medium">【 ${item.t_sell.toFixed(2)} 】</td>
-                <td class="py-3 px-3 text-rose-500 font-medium">【 ${item.hard_stop.toFixed(2)} 】</td>
+                <td class="py-3 px-3 text-blue-400 font-medium">【 ${fmt2(item.t_buy)} 】</td>
+                <td class="py-3 px-3 text-amber-400 font-medium">【 ${fmt2(item.t_sell)} 】</td>
+                <td class="py-3 px-3 text-rose-500 font-medium">【 ${fmt2(item.hard_stop)} 】</td>
                 <td class="py-3 px-3 text-center">
                   <button onclick="inspectStock('${item.code}', '${item.symbol}', '${item.name}')" 
                           class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-bold transition flex items-center gap-1 mx-auto">
@@ -1687,12 +1708,12 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <td class="py-3 px-4 font-bold text-white">
                   ${item.name} <span class="text-xs font-normal text-slate-400">(${item.code})</span>
                 </td>
-                <td class="py-3 px-3 font-semibold ${isUp ? 'stock-up':'stock-down'}">${item.price.toFixed(2)} 元</td>
+                <td class="py-3 px-3 font-semibold ${isUp ? 'stock-up':'stock-down'}">${fmt2(item.price)} 元</td>
                 <td class="py-3 px-3 ${isUp ? 'stock-up':'stock-down'} font-bold">${isUp ? '+':''}${item.pct_today}%</td>
                 <td class="py-3 px-3 text-blue-400 font-medium">【 ${item.entry_range} 】</td>
-                <td class="py-3 px-3 text-amber-400 font-medium">【 ${item.target1.toFixed(2)} 】</td>
-                <td class="py-3 px-3 text-emerald-400 font-medium">【 ${item.target2.toFixed(2)} 】</td>
-                <td class="py-3 px-3 text-rose-500 font-medium">【 ${item.stop_loss.toFixed(2)} 】</td>
+                <td class="py-3 px-3 text-amber-400 font-medium">【 ${fmt2(item.target1)} 】</td>
+                <td class="py-3 px-3 text-emerald-400 font-medium">【 ${fmt2(item.target2)} 】</td>
+                <td class="py-3 px-3 text-rose-500 font-medium">【 ${fmt2(item.stop_loss)} 】</td>
                 <td class="py-3 px-3 text-center">
                   <button onclick="inspectStock('${item.code}', '${item.symbol}', '${item.name}')" 
                           class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-bold transition flex items-center gap-1 mx-auto">
@@ -1711,8 +1732,8 @@ HTML_CONTENT = """<!DOCTYPE html>
         console.error("loadData error:", e);
         const hBody = document.getElementById('holding-body');
         const wBody = document.getElementById('watchlist-body');
-        if (hBody) hBody.innerHTML = '<tr><td colspan="9" class="text-center py-6 text-slate-500">加载中...</td></tr>';
-        if (wBody) wBody.innerHTML = '<tr><td colspan="9" class="text-center py-6 text-slate-500">自选池暂无股票，请在上方添加！</td></tr>';
+        if (hBody) hBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-400">加载异常: ${e.message || e}</td></tr>`;
+        if (wBody) wBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-400">加载异常: ${e.message || e}</td></tr>`;
       }
     }
 
@@ -2595,6 +2616,9 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
         if path in ["/", "/index.html"]:
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(HTML_CONTENT.encode("utf-8"))
 
