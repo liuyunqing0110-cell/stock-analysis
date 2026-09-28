@@ -238,7 +238,7 @@ class HotspotService:
                 consumer_stocks = []
                 for s in rem:
                     n = s.get("名称", "")
-                    if "酒" in sname and not any(k in n for k in ["酒", "曲", "葡", "酿", "特", "茅", "粮", "汾"]):
+                    if "酒" in sname and not any(k in n for k in ["酒", "曲", "葡", "酿", "特", "茅", "粮", "汾", "窖", "顺鑫", "啤酒", "红酒", "黄酒", "春", "贡"]):
                         continue # 过滤非酒杂质股
                     consumer_stocks.append(s)
                 if not consumer_stocks: consumer_stocks = rem
@@ -315,17 +315,9 @@ class HotspotService:
             return "⚠️ 请在 .env 中配置有效的 DEEPSEEK_API_KEY 以生成宏观推演报告。"
 
 # 初始化 HotspotService 实时引擎实例（优先从外部加载，无则使用内置类）
-hotspot_engine = None
-if hotspot_service and hasattr(hotspot_service, "HotspotService"):
-    try:
-        hotspot_engine = hotspot_service.HotspotService()
-        print("✅ 成功加载外部 modules/hotspot_service.py 引擎")
-    except Exception as e:
-        print(f"ℹ️ 外部引擎初始化异常，启用内置完整 HotspotService: {e}")
-        hotspot_engine = HotspotService()
-else:
-    hotspot_engine = HotspotService()
-    print("✅ 成功启用内置完整 HotspotService 实时引擎")
+# 始终优先启用内置最新五大阵营选股与排雷引擎 (确保彻底过滤杂质股并按五大阵营自适应)
+hotspot_engine = HotspotService()
+print("✅ 成功启用内置最新五大阵营 HotspotService 实时引擎")
 
 
 watchlist_manager = safe_import("watchlist_manager")
