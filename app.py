@@ -1266,18 +1266,80 @@ HTML_CONTENT = """<!DOCTYPE html>
       if (!rawText) return '无分析内容';
       let safeText = String(rawText);
       const LF = String.fromCharCode(10);
-      // 1. 将英文半角波浪号 ~ 替换为中文全角 ～，彻底杜绝删除线误触发
       safeText = safeText.replace(/~/g, '～');
-      // 2. 自动给独立引用块（> 决策牌）之间补空行，强制渲染为独立分离的大卡片
       safeText = safeText.replace(new RegExp('(^>.*?)' + LF + '(>)', 'gm'), '$1' + LF + LF + '$2');
-      safeText = safeText.replace(new RegExp('(^>.*?)' + LF + '(>)', 'gm'), '$1' + LF + LF + '$2');
-      // 3. 自动在表格和标题前补空行，确保 Markdown 完美解析为原生 table 元素
       safeText = safeText.replace(new RegExp('([^' + LF + '|])' + LF + '(\\|.*?\\|)', 'g'), '$1' + LF + LF + '$2');
       safeText = safeText.replace(new RegExp('([^' + LF + '])' + LF + '(###\\s+)', 'g'), '$1' + LF + LF + '$2');
-      // 4. 将板块定位提示小字转换为美化指示条
       safeText = safeText.replace(/\*💡\s*(.*?)\*/g, '<div class="section-desc">💡 $1</div>');
-      return marked.parse(safeText);
+
+      // 智能分片：按 ### 一、二、三、四 切割为可切换的独立选项卡
+      const parts = safeText.split(/(###\s*[一二三四1234]、?[^\n]+)/);
+      if (parts.length < 3) {
+        return marked.parse(safeText);
+      }
+
+      // 顶部常驻区域：股票标题与三大决策牌
+      const topContent = marked.parse(parts[0]);
+      let tabs = [];
+      const icons = ['fa-building-columns', 'fa-chart-pie', 'fa-route', 'fa-list-check'];
+
+      for (let i = 1; i < parts.length; i += 2) {
+        let fullTitle = parts[i].replace(/###\s*[一二三四1234]、?\s*/, '').trim();
+        let shortTitle = fullTitle;
+        if (fullTitle.includes('行业') || fullTitle.includes('估值') || fullTitle.includes('阻力') || fullTitle.includes('筹码')) {
+          shortTitle = '🏢 行业地位与估值';
+        } else if (fullTitle.includes('周期') || fullTitle.includes('盘口') || fullTitle.includes('形态')) {
+          shortTitle = '🧭 周期与盘口决策';
+        } else if (fullTitle.includes('路线') || fullTitle.includes('自救') || fullTitle.includes('盈亏')) {
+          shortTitle = '🎯 盈亏应对实操路线';
+        } else if (fullTitle.includes('条件单') || fullTitle.includes('挂单')) {
+          shortTitle = '📋 券商条件单照抄';
+        }
+
+        const bodyHtml = marked.parse(parts[i] + (parts[i+1] || ''));
+        tabs.push({ title: shortTitle, fullTitle: fullTitle, html: bodyHtml });
+      }
+
+      const buttonsHtml = `
+        <div class="my-4 p-1.5 bg-slate-950/80 rounded-xl border border-slate-800 flex flex-wrap gap-2 items-center">
+          ${tabs.map((t, idx) => `
+            <button onclick="switchAiReportTab(${idx})" id="ai-tab-btn-${idx}" class="ai-tab-pill px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${idx === 0 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+              <i class="fa-solid ${icons[idx] || 'fa-folder'}"></i> ${t.title}
+            </button>
+          `).join('')}
+          <button onclick="switchAiReportTab('ALL')" id="ai-tab-btn-ALL" class="ai-tab-pill px-3 py-2 rounded-lg text-xs font-medium bg-slate-800/60 text-slate-400 hover:text-white transition ml-auto">
+            <i class="fa-solid fa-bars"></i> 展开全部
+          </button>
+        </div>
+      `;
+
+      const panelsHtml = `
+        <div id="ai-report-panels" class="mt-3">
+          ${tabs.map((t, idx) => `
+            <div id="ai-tab-panel-${idx}" class="ai-tab-panel ${idx === 0 ? '' : 'hidden'}">
+              ${t.html}
+            </div>
+          `).join('')}
+          <div id="ai-tab-panel-ALL" class="ai-tab-panel hidden space-y-6">
+            ${tabs.map(t => t.html).join('')}
+          </div>
+        </div>
+      `;
+
+      return topContent + buttonsHtml + panelsHtml;
     }
+
+    window.switchAiReportTab = function(tabId) {
+      document.querySelectorAll('.ai-tab-pill').forEach(btn => {
+        btn.className = "ai-tab-pill px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 bg-slate-800 text-slate-300 hover:bg-slate-700";
+      });
+      document.querySelectorAll('.ai-tab-panel').forEach(p => p.classList.add('hidden'));
+
+      const btn = document.getElementById('ai-tab-btn-' + tabId);
+      const panel = document.getElementById('ai-tab-panel-' + tabId);
+      if (btn) btn.className = "ai-tab-pill px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 bg-blue-600 text-white shadow-lg shadow-blue-500/20";
+      if (panel) panel.classList.remove('hidden');
+    };
 
     let currentSelectedCode = null;
     let currentSelectedSymbol = null;
