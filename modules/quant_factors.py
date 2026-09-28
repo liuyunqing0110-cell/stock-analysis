@@ -64,19 +64,58 @@ class QuantFactorsEngine:
         # 2. 中线波段趋势
         mid_score = max(20, min(95, int(trend * 0.7 + (25 if price >= tech["MA20"] else -15) + 15)))
 
-        # 3. 💎 长线价值配置 (真实估值与抗风险权重)
+        # 3. 💎 长线价值配置 (五大投资阵营差异化估值体系)
         long_score = 60
-        if pe > 0:
-            if pe <= 15.0: long_score += 20      # 极高性价比
-            elif pe <= 32.0: long_score += 10    # 合理估值
-            elif pe > 65.0: long_score -= 18     # 估值透支
-        elif pe < 0:
-            long_score -= 25                     # 处于亏损状态，严厉扣分
+        stock_name = self.spot.get("name", "")
 
-        if 0 < pb <= 1.2: long_score += 12       # 破净强安全垫
-        elif pb > 8.0: long_score -= 10
+        # 识别五大阵营属性
+        is_consumer = any(k in stock_name for k in ["酒", "食", "饮", "奶", "药", "医", "家电", "百货", "旅游", "商"])
+        is_tech = any(k in stock_name for k in ["芯", "微", "半导", "光", "软", "信息", "电", "信", "通信", "科技", "智能", "算力", "车"])
+        is_utility = any(k in stock_name for k in ["高速", "路", "电", "水", "燃气", "港", "交"])
+        is_cyclical = any(k in stock_name for k in ["油", "煤", "铝", "铜", "钢", "化", "矿", "海", "航", "农", "渔"])
+        is_bank = any(k in stock_name for k in ["银行", "证券", "保", "券商"])
 
-        if mv >= 500.0: long_score += 8          # 大盘蓝筹
+        if is_consumer:
+            # 消费类：品牌溢价高，PB天然偏高(2~6倍正常)，重在估值中枢与稳定现金流
+            if pe > 0:
+                if pe <= 20.0: long_score += 22
+                elif pe <= 35.0: long_score += 14
+                elif pe > 60.0: long_score -= 15
+            elif pe < 0: long_score -= 25
+            if 1.0 <= pb <= 4.5: long_score += 10  # 消费优质品牌PB区间加分
+            elif pb > 9.0: long_score -= 10
+        elif is_tech:
+            # 科技成长类：重在产业趋势与研发弹性，宽容较高PE
+            if pe > 0:
+                if pe <= 35.0: long_score += 20
+                elif pe <= 55.0: long_score += 12
+                elif pe > 85.0: long_score -= 15
+            elif pe < 0: long_score -= 12 # 科技股研发期亏损扣分适度宽容
+            if pb <= 6.0: long_score += 8
+        elif is_utility or is_bank:
+            # 公用事业与金融红利：看重深度破净与高股息现金流安全垫 (如福建高速PB 0.79)
+            if 0 < pb <= 0.85: long_score += 25     # 深度破净特许资产加重分
+            elif pb <= 1.15: long_score += 15
+            elif pb > 2.5: long_score -= 15
+            if 0 < pe <= 15.0: long_score += 12
+        elif is_cyclical:
+            # 周期与大宗资源：看PB重置成本底，防低PE陷阱
+            if 0 < pb <= 1.0: long_score += 24      # 周期底部破净重置底
+            elif pb <= 1.6: long_score += 12
+            # 周期底部微利/亏损不致死，若破净依然有价值
+            if pe < 0 and pb <= 1.0: long_score += 5 
+            elif pe > 0 and pe <= 12.0: long_score += 8
+        else:
+            # 通用基准
+            if pe > 0:
+                if pe <= 15.0: long_score += 20
+                elif pe <= 32.0: long_score += 10
+                elif pe > 65.0: long_score -= 18
+            elif pe < 0: long_score -= 25
+            if 0 < pb <= 1.2: long_score += 12
+            elif pb > 8.0: long_score -= 10
+
+        if mv >= 500.0: long_score += 8          # 大盘蓝筹抗风险
         elif mv < 30.0 and mv > 0: long_score -= 10
 
         long_score = max(20, min(95, long_score))

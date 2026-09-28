@@ -182,7 +182,7 @@ class HotspotService:
             for sec in all_sectors:
                 clean_name = re.sub(r'[ⅡⅢIV123]', '', sec["名称"]).strip()
                 if clean_name in seen or not clean_name: continue
-                stocks_tiered, count = self.fetch_sector_constituents(sec["node"])
+                stocks_tiered, count = self.fetch_sector_constituents(sec["node"], sec["名称"])
                 if count < 10: continue
                 seen.add(clean_name)
                 dynamic_results.append({
@@ -194,7 +194,7 @@ class HotspotService:
         except Exception:
             return []
 
-    def fetch_sector_constituents(self, node_code: str) -> tuple:
+    def fetch_sector_constituents(self, node_code: str, sec_name: str = "") -> tuple:
         url = f"http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=50&sort=changepercent&asc=0&node={node_code}"
         try:
             s = requests.Session()
@@ -223,9 +223,50 @@ class HotspotService:
             cores = sorted([s for s in cleaned if s["代码"] not in used], key=lambda x: x["成交额(亿)"], reverse=True)[:5]
             for s in cores: used.add(s["代码"])
             rem = [s for s in cleaned if s["代码"] not in used]
-            cheaps = sorted([s for s in rem if 3.0 <= s["最新价"] <= 20.0], key=lambda x: (x["市净率PB"], -x["涨跌幅(%)"]))[:5]
-            if not cheaps: cheaps = sorted(rem, key=lambda x: x["最新价"])[:5]
-            return {"⚡ 进攻龙头(T+1)": leaders, "🛡️ 稳健中军(长线)": cores, "💰 高性价比低价股": cheaps}, len(cleaned)
+
+            # 💡【五大核心投资阵营差异化选股体系】
+            sname = sec_name or ""
+            if any(k in sname for k in ["芯片", "半导体", "算力", "软件", "AI", "通信", "电子", "元器件", "IT", "计算机", "军工", "光伏", "电池", "机械", "汽车"]):
+                camp_type = "TECH"
+                t3_title = "🚀 高弹性成长潜伏"
+                # 科技股重在弹性与量能，放宽PB限制
+                cheaps = sorted([s for s in rem if 5.0 <= s["最新价"] <= 35.0], key=lambda x: (-x["成交额(亿)"], abs(x["涨跌幅(%)"])))[:5]
+            elif any(k in sname for k in ["酒", "食品", "饮料", "家电", "医药", "生物", "百货", "旅游", "酒店", "商业", "零售"]):
+                camp_type = "CONSUMER"
+                t3_title = "🍷 精选特色品牌(高弹性)"
+                # 消费股剔除跨界杂质，优选 1.0 <= PB <= 4.0 的特色名优品牌，不单纯图破净
+                consumer_stocks = []
+                for s in rem:
+                    n = s.get("名称", "")
+                    if "酒" in sname and not any(k in n for k in ["酒", "曲", "葡", "酿", "特", "茅", "粮", "汾"]):
+                        continue # 过滤非酒杂质股
+                    consumer_stocks.append(s)
+                if not consumer_stocks: consumer_stocks = rem
+                cheaps = sorted([s for s in consumer_stocks if 3.0 <= s["最新价"] <= 25.0 and s["市净率PB"] >= 0.9], key=lambda x: (abs(x["市净率PB"] - 2.0), -x["成交额(亿)"]))[:5]
+            elif any(k in sname for k in ["石油", "煤炭", "有色", "钢铁", "化工", "材料", "矿", "海运", "航运"]):
+                camp_type = "CYCLICAL"
+                t3_title = "💎 周期大底重置资产"
+                # 周期股看重重置成本与破净安全垫
+                cheaps = sorted([s for s in rem if s["市净率PB"] <= 1.2], key=lambda x: (x["市净率PB"], -x["成交额(亿)"]))[:5]
+            elif any(k in sname for k in ["银行", "证券", "券商", "保险", "金融"]):
+                camp_type = "FINANCIALS"
+                t3_title = "🏛️ 低估值高股息金"
+                # 金融股看深度破净与高分红
+                cheaps = sorted([s for s in rem if s["市净率PB"] <= 0.9], key=lambda x: (x["市净率PB"], -x["成交额(亿)"]))[:5]
+            elif any(k in sname for k in ["高速", "公路", "电力", "水务", "燃气", "港口", "环保", "交通"]):
+                camp_type = "UTILITY"
+                t3_title = "💰 稳健高股息潜伏"
+                # 公用事业看破净安全垫与充沛现金流
+                cheaps = sorted([s for s in rem if s["市净率PB"] <= 1.1], key=lambda x: (x["市净率PB"], -x["成交额(亿)"]))[:5]
+            else:
+                camp_type = "GENERAL"
+                t3_title = "💰 高性价比低价潜伏股"
+                cheaps = sorted([s for s in rem if 3.0 <= s["最新价"] <= 20.0], key=lambda x: (x["市净率PB"], -x["涨跌幅(%)"]))[:5]
+
+            if not cheaps:
+                cheaps = sorted(rem, key=lambda x: x["最新价"])[:5]
+
+            return {"⚡ 进攻龙头(T+1)": leaders, "🛡️ 稳健中军(长线)": cores, t3_title: cheaps}, len(cleaned)
         except Exception:
             return {}, 0
 
@@ -2170,7 +2211,9 @@ HTML_CONTENT = """<!DOCTYPE html>
 
       const t1 = sec.三层标的['⚡ 进攻龙头(T+1)'] || [];
       const t2 = sec.三层标的['🛡️ 稳健中军(长线)'] || [];
-      const t3 = sec.三层标的['💰 高性价比低价股'] || [];
+      const t3Key = Object.keys(sec.三层标的).find(k => k !== '⚡ 进攻龙头(T+1)' && k !== '🛡️ 稳健中军(长线)') || '💰 高性价比低价股';
+      const t3 = sec.三层标的[t3Key] || [];
+      const t3Title = t3Key;
 
       const container = document.getElementById('sector-stock-container');
       container.innerHTML = `
@@ -2216,7 +2259,7 @@ HTML_CONTENT = """<!DOCTYPE html>
           <!-- 梯队 3 -->
           <div class="bg-slate-900/60 p-4 rounded-xl border border-emerald-500/30">
             <h4 class="text-sm font-bold text-emerald-400 mb-3 flex items-center justify-between">
-              <span><i class="fa-solid fa-coins mr-1"></i> 高性价比低价潜伏股</span>
+              <span><i class="fa-solid fa-coins mr-1"></i> ${t3Title}</span>
               <span class="text-xs text-emerald-400/80 font-mono">${t3.length} 只标的</span>
             </h4>
             <div class="space-y-2.5">
