@@ -128,7 +128,7 @@ class InstitutionalRiskEngine:
         return {
             "name": name, "code": code, "price": p, "cost": cost, "shares": shares,
             "loss_pct": loss_pct, "total_loss": total_loss, "is_profit": is_profit,
-            "buy_range": f"{buy_low} ~ {buy_high} 元",
+            "buy_range": f"{buy_low} ~ {buy_high}",
             "t_buy": t_buy, "t_sell": t_sell, "per_t_cash": per_t_cash,
             "protect_line": protect_line, "target1": target1, "target2": target2,
             "pyr_buy": pyr_add_price, "new_cost": new_avg_cost, "break_even_pct": break_even_pct,
