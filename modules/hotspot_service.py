@@ -167,7 +167,7 @@ class HotspotService:
             return []
 
     def fetch_sector_constituents(self, node_code: str, sec_name: str = "") -> tuple:
-        url = f"http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=50&sort=changepercent&asc=0&node={node_code}"
+        url = f"http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=80&sort=changepercent&asc=0&node={node_code}"
         try:
             s = requests.Session()
             s.trust_env = False
@@ -179,13 +179,40 @@ class HotspotService:
                 try:
                     price = float(it.get("trade", 0))
                     if price <= 0: continue
+                    name = str(it.get("name", "")).strip()
+                    symbol = str(it.get("symbol", "")).replace("sh", "").replace("sz", "").strip()
+
+                    # 🚨【严苛合规与排雷防火墙】
+                    # 1. 绝对剔除退市股（含“退市”、“退”、摘牌等标记）
+                    if any(bad in name for bad in ["退市", "摘牌"]) or name.endswith("退"):
+                        continue
+                    # 2. 绝对剔除风险警示股（ST、*ST、SST、S*ST），严防戴帽暴雷股污染龙头与中军池
+                    if "ST" in name.upper():
+                        continue
+                    # 3. 剔除停牌/零成交死水股
+                    amount = float(it.get("amount", 0))
+                    if amount <= 0:
+                        continue
+                    # 4. 剔除老三板/非主板异常代码（如400、420、430等）
+                    if symbol.startswith(("400", "420", "430")):
+                        continue
+
+                    # 5. 市净率PB合理性校验（必须 > 0.05，负PB说明净资产为负、资不抵债，极度危险）
+                    raw_pb = it.get("pb")
+                    try:
+                        pb_val = float(raw_pb) if raw_pb is not None else 99.0
+                    except:
+                        pb_val = 99.0
+                    if pb_val <= 0:
+                        continue
+
                     cleaned.append({
-                        "代码": str(it.get("symbol", "")).replace("sh", "").replace("sz", ""),
-                        "名称": str(it.get("name", "")),
+                        "代码": symbol,
+                        "名称": name,
                         "最新价": round(price, 2),
                         "涨跌幅(%)": round(float(it.get("changepercent", 0)), 2),
-                        "成交额(亿)": round(float(it.get("amount", 0)) / 1e8, 1),
-                        "市净率PB": round(float(it.get("pb", 99.0)), 2) if it.get("pb") else 99.0
+                        "成交额(亿)": round(amount / 1e8, 1),
+                        "市净率PB": round(pb_val, 2)
                     })
                 except: continue
             if len(cleaned) < 10: return {}, len(cleaned)
