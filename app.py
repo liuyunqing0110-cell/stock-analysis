@@ -350,6 +350,37 @@ def resolve_stock(keyword):
 
 # 准确获取个股实时行情
 def fetch_real_quote(symbol):
+    # 1. 优先尝试腾讯财经行情 (同腾讯云机房直连，极速且从不封禁，含方案一基础财务与估值因子)
+    try:
+        r = requests.get(f"http://qt.gtimg.cn/q={symbol}", headers={"User-Agent": "Mozilla/5.0"}, timeout=2.5)
+        r.encoding = "gbk"
+        if "v_" in r.text and "~" in r.text:
+            parts = r.text.split("~")
+            if len(parts) > 46:
+                name = parts[1]
+                curr = float(parts[3] or 0.0)
+                prev = float(parts[4] or curr)
+                high = float(parts[33] or curr) if parts[33] else curr
+                low = float(parts[34] or curr) if parts[34] else curr
+                vol = float(parts[6] or 0.0) * 100
+                turnover = float(parts[37] or 0.0) * 10000
+
+                turnover_rate = float(parts[38] or 0.0) if len(parts) > 38 and parts[38] else 0.0
+                pe = float(parts[39] or 0.0) if len(parts) > 39 and parts[39] else 0.0
+                circ_mv = float(parts[44] or 0.0) if len(parts) > 44 and parts[44] else 0.0
+                total_mv = float(parts[45] or 0.0) if len(parts) > 45 and parts[45] else 0.0
+                pb = float(parts[46] or 0.0) if len(parts) > 46 and parts[46] else 0.0
+
+                if curr > 0:
+                    return {
+                        "name": name, "curr_price": curr, "prev_close": prev,
+                        "high": high, "low": low, "volume": vol, "turnover": turnover,
+                        "pe": pe, "pb": pb, "total_mv": total_mv, "circ_mv": circ_mv, "turnover_rate": turnover_rate
+                    }
+    except Exception:
+        pass
+
+    # 2. 备选尝试新浪财经行情
     try:
         r = requests.get(f"http://hq.sinajs.cn/list={symbol}", headers=HEADERS, timeout=3)
         r.encoding = "gbk"
@@ -364,18 +395,13 @@ def fetch_real_quote(symbol):
                 vol = float(_get(f, 8)) if len(f) > 8 and _get(f, 8) else 0.0
                 turnover = float(_get(f, 9)) if len(f) > 9 and _get(f, 9) else 0.0
                 return {
-                    "name": _get(f, 0, ""),
-                    "curr_price": curr,
-                    "prev_close": prev,
-                    "high": high,
-                    "low": low,
-                    "volume": vol,
-                    "turnover": turnover
+                    "name": _get(f, 0, ""), "curr_price": curr, "prev_close": prev,
+                    "high": high, "low": low, "volume": vol, "turnover": turnover,
+                    "pe": 0.0, "pb": 0.0, "total_mv": 0.0, "circ_mv": 0.0, "turnover_rate": 0.0
                 }
-    except Exception as e:
-        print(f"fetch_real_quote error: {e}")
-    return {"name": "", "curr_price": 0.0, "prev_close": 0.0, "high": 0.0, "low": 0.0, "volume": 0.0, "turnover": 0.0}
-
+    except Exception:
+        pass
+    return {"name": "", "curr_price": 0.0, "prev_close": 0.0, "high": 0.0, "low": 0.0, "volume": 0.0, "turnover": 0.0, "pe": 0.0, "pb": 0.0, "total_mv": 0.0, "circ_mv": 0.0, "turnover_rate": 0.0}
 # 抓取前复权日K线数据 (新浪财经接口 + 腾讯财经备选)
 def fetch_kline_history(symbol, days=120):
     try:
@@ -419,12 +445,12 @@ def fetch_kline_history(symbol, days=120):
     return {"success": False, "error": "K线接口暂时不可用"}
 
 # 多因子评分计算 (连接 quant_factors 模块，带智能降级计算)
-def compute_quant_scores(code, name, curr_price, prev_close, klines_info=None):
+def compute_quant_scores(code, name, curr_price, prev_close, klines_info=None, quote_info=None):
     if quant_factors:
         for fn in ["calculate_stock_scores", "get_scores", "analyze_stock", "calculate_factors"]:
             if hasattr(quant_factors, fn):
                 try:
-                    res = getattr(quant_factors, fn)(code)
+                    res = getattr(quant_factors, fn)(code, name, curr_price, prev_close, klines_info, spot_info=quote_info)
                     if isinstance(res, dict) and "short_term" in res:
                         return res
                 except Exception:
@@ -432,9 +458,9 @@ def compute_quant_scores(code, name, curr_price, prev_close, klines_info=None):
 
     ma5, ma20, ma60 = curr_price, curr_price, curr_price
     rsi_14 = 52.0
-    short_score = 72
-    mid_score = 68
-    long_score = 75
+    short_score = 65
+    mid_score = 65
+    long_score = 65
 
     if klines_info and klines_info.get("success") and len(klines_info.get("klines", [])) >= 20:
         klines = klines_info.get("klines", [])
@@ -467,10 +493,22 @@ def compute_quant_scores(code, name, curr_price, prev_close, klines_info=None):
         elif rsi_14 > 80:
             short_score -= 10
 
-        if curr_price <= 15.0:
-            long_score += 12
-        elif curr_price <= 25.0:
-            long_score += 6
+    if quote_info:
+        pe = float(quote_info.get("pe", 0.0) or 0.0)
+        pb = float(quote_info.get("pb", 0.0) or 0.0)
+        mv = float(quote_info.get("total_mv", 0.0) or 0.0)
+        if pe > 0:
+            if pe <= 15.0: long_score += 20
+            elif pe <= 32.0: long_score += 10
+            elif pe > 65.0: long_score -= 18
+        elif pe < 0:
+            long_score -= 25
+
+        if 0 < pb <= 1.2: long_score += 12
+        elif pb > 8.0: long_score -= 10
+
+        if mv >= 500.0: long_score += 8
+        elif mv < 30.0 and mv > 0: long_score -= 10
 
     short_score = max(20, min(95, short_score))
     mid_score = max(20, min(95, mid_score))
@@ -485,19 +523,20 @@ def compute_quant_scores(code, name, curr_price, prev_close, klines_info=None):
     mt_tag, mt_cls = get_tag(mid_score)
     lt_tag, lt_cls = get_tag(long_score)
 
-    st_desc = "量比爆发配合良好，突破关键压力位，具备短线强攻动能" if short_score >= 80 else ("量能温和中性震荡，分时回踩均线支撑，适合逢低吸纳" if short_score >= 60 else "均线空头受压，量能萎缩存量博弈，短线动能偏弱严禁追高")
-    mt_desc = "上升通道维持完好，MA20/60多头排列，波段趋势强劲" if mid_score >= 80 else ("箱体震荡整理蓄势，均线系统纠缠粘合，等待右侧放量信号" if mid_score >= 60 else "破位下行通道中，中均线压制明显，仍处筑底调整周期")
-    lt_desc = "处于历史估值低分位，安全边际极厚，向上赔率巨大" if long_score >= 80 else ("估值合理中枢水平，基本面支撑良好，具备防御配置价值" if long_score >= 60 else "估值溢价偏高或处于周期高位，长线安全垫不足需谨慎")
+    st_desc = "量比爆发配合良好，突破关键压力位，具备短线强攻动能" if short_score >= 80 else ("量能温和中性震荡，分时回踩均线支撑，适合逢低吸纳" if short_score >= 60 else "均线空头受压，短线动能偏弱严禁追高")
+    mt_desc = "上升通道维持完好，MA20/60多头排列，波段趋势强劲" if mid_score >= 80 else ("箱体震荡整理蓄势，等待右侧放量信号" if mid_score >= 60 else "破位下行通道中，中均线压制明显")
+    lt_desc = "处于历史估值低分位，安全边际极厚，向上赔率巨大" if long_score >= 80 else ("估值合理中枢水平，基本面支撑良好" if long_score >= 60 else "估值溢价偏高或处于周期高位，长线需谨慎")
 
     return {
         "short_term": {"score": short_score, "tag": st_tag, "style": st_cls, "desc": st_desc},
         "mid_term": {"score": mid_score, "tag": mt_tag, "style": mt_cls, "desc": mt_desc},
         "long_term": {"score": long_score, "tag": lt_tag, "style": lt_cls, "desc": lt_desc},
-        "ma5": ma5, "ma20": ma20, "ma60": ma60,
-        "rsi": rsi_14,
+        "ma5": ma5, "ma20": ma20, "ma60": ma60, "rsi": rsi_14,
+        "pe": quote_info.get("pe", 0.0) if quote_info else 0.0,
+        "pb": quote_info.get("pb", 0.0) if quote_info else 0.0,
+        "total_mv": quote_info.get("total_mv", 0.0) if quote_info else 0.0,
         "overall_grade": "A+ 顶格精选" if short_score >= 82 else ("A 级 优先标的" if (short_score+mid_score)/2 >= 70 else "B 级 观察仓位")
     }
-
 # 实战风控点位生成 (连接 trade_plan 模块)
 def compute_trade_plan(price, is_holding=False, cost=0.0):
     if trade_plan:
@@ -777,7 +816,13 @@ def get_enriched_stocks(stocks=None):
             name = quote.get("name") or std_name or raw_name or code
             curr_price = float(quote.get("curr_price", 0.0) or 0.0)
             prev_close = float(quote.get("prev_close", 0.0) or 0.0)
-            if curr_price <= 0: curr_price = cost if cost > 0 else 5.0
+            if curr_price <= 0:
+                # 尝试从K线历史拉取真实最后收盘价，坚决不拿成本价冒充现价
+                k_fallback = fetch_kline_history(symbol, days=3)
+                if k_fallback and k_fallback.get("klines"):
+                    curr_price = float(k_fallback["klines"][-1][1])
+                else:
+                    curr_price = prev_close if prev_close > 0 else (cost if cost > 0 else 5.0)
             if prev_close <= 0: prev_close = curr_price
             
             pct_today = round(((curr_price - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
@@ -946,7 +991,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       <div class="flex gap-4 text-xs font-medium">
         <label class="flex items-center gap-1.5 cursor-pointer">
           <input type="radio" name="stock-type" value="holding" checked onchange="toggleType(true)" class="text-blue-500">
-          <span class="text-white font-bold">💼 实战持仓 (做T解套)</span>
+          <span class="text-white font-bold">💼 实战持仓 (做T增益·降本锁利)</span>
         </label>
         <label class="flex items-center gap-1.5 cursor-pointer">
           <input type="radio" name="stock-type" value="watchlist" onchange="toggleType(false)" class="text-blue-500">
@@ -1090,7 +1135,7 @@ HTML_CONTENT = """<!DOCTYPE html>
           <div class="flex items-center gap-4 mt-1 text-sm">
             <span>最新价: <strong id="detail-stock-price" class="text-lg text-white">--</strong></span>
             <span>涨跌幅: <strong id="detail-stock-pct" class="text-lg">--</strong></span>
-            <span class="text-xs text-slate-400">MA5: <span id="detail-ma5">--</span> | MA20: <span id="detail-ma20">--</span> | RSI(14): <span id="detail-rsi">--</span></span>
+            <span class="text-xs text-slate-400">PE(动): <span id="detail-pe" class="text-white font-semibold">--</span> | PB: <span id="detail-pb" class="text-white font-semibold">--</span> | 总市值: <span id="detail-mv" class="text-white font-semibold">--</span> | MA5: <span id="detail-ma5">--</span> | MA20: <span id="detail-ma20">--</span> | RSI(14): <span id="detail-rsi">--</span></span>
           </div>
         </div>
       </div>
@@ -1636,6 +1681,13 @@ HTML_CONTENT = """<!DOCTYPE html>
           const pctEl = document.getElementById('detail-stock-pct');
           pctEl.innerText = (pct > 0 ? "+" : "") + pct + "%";
           pctEl.className = pct >= 0 ? "text-lg text-rose-500 font-bold" : "text-lg text-emerald-500 font-bold";
+
+          const peVal = data.quote.pe;
+          document.getElementById('detail-pe').innerText = (peVal && peVal > 0) ? peVal.toFixed(1) + '倍' : (peVal < 0 ? '亏损' : '--');
+          const pbVal = data.quote.pb;
+          document.getElementById('detail-pb').innerText = (pbVal && pbVal > 0) ? pbVal.toFixed(2) : '--';
+          const mvVal = data.quote.total_mv;
+          document.getElementById('detail-mv').innerText = (mvVal && mvVal > 0) ? mvVal.toFixed(1) + '亿' : '--';
         }
 
         if (data.scores) {
@@ -2559,7 +2611,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
             kline_data = fetch_kline_history(symbol, days=120)
             curr_p = float(quote.get("curr_price", 0.0) or 0.0)
             prev_c = float(quote.get("prev_close", 0.0) or curr_p)
-            scores = compute_quant_scores(code, quote.get("name", ""), curr_p, prev_c, kline_data)
+            scores = compute_quant_scores(code, quote.get("name", ""), curr_p, prev_c, kline_data, quote_info=quote)
 
             # 智能检查是否为用户真实持仓
             pf_file = get_portfolio_path()
@@ -2731,7 +2783,7 @@ class PurePythonStockHandler(BaseHTTPRequestHandler):
                 kline_data = fetch_kline_history(target_symbol, days=60)
                 curr_p = float(quote.get("curr_price", 0.0) or 0.0)
                 prev_c = float(quote.get("prev_close", 0.0) or curr_p)
-                scores = compute_quant_scores(target_code, quote.get("name"), curr_p, prev_c, kline_data)
+                scores = compute_quant_scores(target_code, quote.get("name"), curr_p, prev_c, kline_data, quote_info=quote)
 
                 # 智能识别当前登录用户的实战持仓股并提取真实成本
                 user = self.get_current_user()
