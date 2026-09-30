@@ -112,7 +112,7 @@ class InstitutionalRiskEngine:
 
         # 移动保利线 (盈利持仓保护锁定 65% 利润)
         profit_margin = p - cost
-        protect_line = round(cost + profit_margin * 0.65, 2) if profit_margin > 0 else round(cost * 0.98, 2)
+        protect_line = round(cost + profit_margin * 0.65, 2) if profit_margin > 0 else round(p * (1 - (atr_pct * 1.5) / 100), 2)
         target1 = round(p * 1.08, 2) if is_profit else round(cost * 1.02, 2)
         target2 = round(p * 1.18, 2) if is_profit else round(cost * 1.10, 2)
 

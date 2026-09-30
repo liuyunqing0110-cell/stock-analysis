@@ -6,9 +6,10 @@ import pandas as pd
 import numpy as np
 
 class QuantFactorsEngine:
-    def __init__(self, kline_df: pd.DataFrame, spot_info: dict):
+    def __init__(self, kline_df: pd.DataFrame, spot_info: dict, klines_info: dict = None):
         self.df = kline_df.copy() if kline_df is not None and not kline_df.empty else None
         self.spot = spot_info or {}
+        self.klines_info = klines_info or {}
 
     def calculate_technical_factors(self) -> dict:
         if self.df is None or len(self.df) < 5:
@@ -49,18 +50,76 @@ class QuantFactorsEngine:
         pb = float(self.spot.get("pb", 0.0) or 0.0)
         mv = float(self.spot.get("total_mv", 0.0) or 0.0)
 
-        # 1. 短线 T+1 交易 (技术动量 80% + 流动性 20%)
-        t1_score = 50
-        if trend >= 70: t1_score += 25
-        elif trend < 30: t1_score -= 15
+        # 1. ⚡ 短线 T+1 交易量化评分 (总分 100 分，深度结合 A 股 T+1 制度与换手率核心权重)
+        # 权重配比：均线多头动量 35% + 换手率筹码活跃度 30% + RSI买卖动量 20% + 量比盘口 15%
+        t1_base = 50
 
-        if 48 <= rsi <= 72: t1_score += 15
-        elif rsi > 82: t1_score -= 20
+        # A. 均线多头动量 (满分贡献 35 分)
+        trend_contrib = 0
+        if trend >= 75: trend_contrib = 20
+        elif trend >= 45: trend_contrib = 10
+        elif trend < 30: trend_contrib = -15
 
-        if 3.0 <= turnover_rate <= 12.0: t1_score += 10
-        elif turnover_rate > 22.0: t1_score -= 10
-        t1_score = max(20, min(95, t1_score))
+        # B. 换手率核心评级 (满分贡献 30 分，专为 A 股 T+1 双轨复合模型定制)
+        # 权重配比：当日换手率 60% + 近5日平均换手率 40% (MA5换手率)
+        # 既能捕捉当天的资金突击力度与真实承接，又能评估常态流动性底色，剔除突发脉冲式一日游杂毛
+        turnover_rates = self.klines_info.get("turnover_rates", [])
+        valid_rates = [float(x) for x in turnover_rates if x is not None and float(x) > 0]
+        if len(valid_rates) >= 5:
+            ma5_turnover = round(sum(valid_rates[-5:]) / 5.0, 2)
+        elif valid_rates:
+            ma5_turnover = round(sum(valid_rates) / len(valid_rates), 2)
+        else:
+            ma5_turnover = turnover_rate
 
+        comp_turnover = round(turnover_rate * 0.6 + ma5_turnover * 0.4, 2)
+        turnover_contrib = 0
+        turnover_status = ""
+        is_pulse_warning = False
+
+        # 核心防坑识别：平时地量(<1.5%)，今天突然脉冲放量(>5%) -> 典型一日游杂毛脉冲
+        if turnover_rate >= 5.0 and ma5_turnover < 1.6:
+            is_pulse_warning = True
+
+        if comp_turnover <= 0:
+            turnover_contrib = 0
+            turnover_status = "换手率数据收集中"
+        elif comp_turnover < 1.8:
+            turnover_contrib = -18
+            turnover_status = f"今日{turnover_rate:.2f}%/5日均{ma5_turnover:.2f}% (地量清淡)，常态流动性不足，T+1 弹性较差严禁追高"
+        elif comp_turnover < 3.5:
+            turnover_contrib = -6
+            turnover_status = f"今日{turnover_rate:.2f}%/5日均{ma5_turnover:.2f}% (缩量整理)，资金观望情绪偏浓，适合逢低潜伏"
+        elif 3.5 <= comp_turnover < 7.0:
+            turnover_contrib = 14
+            turnover_status = f"今日{turnover_rate:.2f}%/5日均{ma5_turnover:.2f}% (温和良性放量)，主力换手充分，T+1 胜率优良"
+        elif 7.0 <= comp_turnover < 15.0:
+            turnover_contrib = 24
+            turnover_status = f"今日{turnover_rate:.2f}%/5日均{ma5_turnover:.2f}% (主力抢筹黄金区)，资金持续沉淀，T+1 爆发力极强"
+        elif 15.0 <= comp_turnover < 25.0:
+            turnover_contrib = 8
+            turnover_status = f"今日{turnover_rate:.2f}%/5日均{ma5_turnover:.2f}% (多空剧烈博弈)，分歧加剧，T+1 需防冲高回落洗盘"
+        else:
+            turnover_contrib = -16
+            turnover_status = f"今日{turnover_rate:.2f}%/5日均{ma5_turnover:.2f}% (天量过热松动)，警惕主力借巨震冲高派发，防范次日反杀"
+
+        if is_pulse_warning:
+            turnover_contrib -= 8
+            turnover_status += " 【⚠️ 警惕：突发单日脉冲放量，防一日游退潮】"
+        # C. RSI 超买超卖指标 (满分贡献 20 分)
+        rsi_contrib = 0
+        if 48 <= rsi <= 72: rsi_contrib = 12
+        elif rsi > 82: rsi_contrib = -15 # 严重超买，T+1 次日容易回踩
+        elif rsi < 30: rsi_contrib = 5   # 严重超跌反弹博弈
+
+        # D. 量比动能 (满分贡献 15 分)
+        vol_ratio = tech.get("量比", 1.0)
+        vol_contrib = 0
+        if 1.5 <= vol_ratio <= 3.5: vol_contrib = 8
+        elif vol_ratio > 5.0: vol_contrib = -5 # 脉冲过激
+
+        t1_score = t1_base + trend_contrib + turnover_contrib + rsi_contrib + vol_contrib
+        t1_score = max(20, min(95, int(t1_score)))
         # 2. 中线波段趋势
         mid_score = max(20, min(95, int(trend * 0.7 + (25 if price >= tech["MA20"] else -15) + 15)))
 
@@ -130,11 +189,11 @@ class QuantFactorsEngine:
         lt_tag, lt_cls = get_tag_info(long_score)
 
         return {
-            "short_term": {"score": t1_score, "tag": st_tag, "style": st_cls, "desc": "短线资金动量与换手配合良好" if t1_score>=75 else "短线震荡整理"},
+            "short_term": {"score": t1_score, "tag": st_tag, "style": st_cls, "desc": turnover_status},
             "mid_term": {"score": mid_score, "tag": mt_tag, "style": mt_cls, "desc": "波段均线支撑强劲" if mid_score>=75 else "中线通道运行中"},
             "long_term": {"score": long_score, "tag": lt_tag, "style": lt_cls, "desc": "估值安全边际深厚" if long_score>=75 else "估值处于合理偏高水平"},
             "ma5": tech["MA5"], "ma20": tech["MA20"], "ma60": tech["MA60"], "rsi": tech["RSI_14"],
-            "pe": pe, "pb": pb, "total_mv": mv, "turnover_rate": turnover_rate,
+            "pe": pe, "pb": pb, "total_mv": mv, "turnover_rate": turnover_rate, "ma5_turnover": ma5_turnover, "composite_turnover": comp_turnover,
             "overall_grade": "A+ 顶格精选" if (t1_score+mid_score)/2 >= 80 else ("A 级 优先标的" if (t1_score+mid_score)/2 >= 65 else "B 级 观察仓位")
         }
 
@@ -147,7 +206,7 @@ def calculate_stock_scores(code, name="", curr_price=0.0, prev_close=0.0, klines
 
     spot = spot_info or {}
     spot["curr_price"] = curr_price
-    engine = QuantFactorsEngine(df, spot)
+    engine = QuantFactorsEngine(df, spot, klines_info=klines_info)
     tech = engine.calculate_technical_factors()
     return engine.calculate_scores(tech)
 
